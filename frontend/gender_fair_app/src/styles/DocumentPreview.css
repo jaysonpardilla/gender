@@ -1,0 +1,578 @@
+/* Document Preview Styles */
+
+.document-preview-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+/* PDF Viewer */
+.pdf-viewer-wrapper {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
+  background: var(--bg-secondary);
+  position: relative;
+  transition: background-color 0.3s ease;
+}
+
+.pdf-viewer {
+  background: var(--card-bg);
+  box-shadow: none;
+  display: flex;
+  justify-content: center;
+  transition: background-color 0.3s ease;
+}
+
+.pdf-loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 30px 50px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  z-index: 100;
+}
+
+.pdf-error,
+.pdf-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.pdf-error {
+  color: #ff6b6b;
+  background: var(--bg-error);
+}
+
+/* DOCX Viewer */
+.docx-container {
+  background: var(--card-bg);
+  transition: background-color 0.3s ease;
+}
+
+.docx-viewer-wrapper {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg-secondary);
+  transition: background-color 0.3s ease;
+}
+
+.docx-viewer {
+  background: transparent;
+  padding: 0;
+  max-width: 100%;
+  margin: 0 auto;
+  box-shadow: none;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: 'Calibri', 'Segoe UI', sans-serif;
+}
+
+.docx-viewer .docx-page {
+  margin: 0 auto 18px;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+  max-width: 100%;
+  background: transparent;
+  box-shadow: none;
+}
+
+.docx-viewer .docx-page:last-child {
+  margin-bottom: 0;
+}
+
+.docx-viewer .docx-page > section.docx,
+.docx-viewer .docx-page > .docx-wrapper {
+  background: transparent !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.docx-viewer .docx-page > section.docx * {
+  font-size: 14px !important;
+}
+
+/* Ensure base DOCX sections also inherit the preview font-size */
+.docx-viewer .docx-page,
+.docx-viewer .docx-page section.docx {
+  font-size: 14px !important;
+}
+
+/* Suppress black rectangle artifacts in DOCX rendering */
+.docx-viewer svg {
+  display: none !important;
+}
+
+.docx-viewer rect[style*="black"],
+.docx-viewer rect[style*="#000"],
+.docx-viewer rect[fill="black"],
+.docx-viewer rect[fill="#000000"] {
+  display: none !important;
+}
+
+/* Hide any absolutely positioned black elements that might be artifacts */
+.docx-viewer div[style*="background: rgb(0, 0, 0)"],
+.docx-viewer div[style*="background:#000"],
+.docx-viewer div[style*="background-color: rgb(0, 0, 0)"],
+.docx-viewer div[style*="background-color:#000"] {
+  display: none !important;
+}
+
+/* Ensure section.docx has clean rendering without borders or shadows */
+section.docx {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+#docx-container {
+  width: 100%;
+}
+
+/* Ensure highlighting spans display properly in DOCX */
+#docx-container span {
+  text-decoration-skip-ink: none;
+}
+
+/* Blue background for approved replacements in DOCX */
+#docx-container span[style*="#dbeafe"] {
+  background-color: #dbeafe;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+/* Red wavy underline for unapproved words in DOCX */
+#docx-container span[style*="#ef4444"] {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #ef4444;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* TXT Viewer */
+.txt-container {
+  background: var(--card-bg);
+  transition: background-color 0.3s ease;
+}
+
+.txt-viewer-wrapper {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  background: var(--bg-secondary);
+  transition: background-color 0.3s ease;
+}
+
+.txt-viewer {
+  background: var(--card-bg);
+  padding: 20px;
+  border-radius: 4px;
+  max-width: 900px;
+  margin: 0 auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.3s ease;
+}
+
+.txt-viewer pre {
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  color: #333;
+}
+
+/* Ensure highlighting spans display properly */
+.txt-viewer pre span {
+  display: inline;
+  text-decoration-skip-ink: none;
+}
+
+/* Blue background for approved replacements */
+.txt-viewer pre span[style*="#dbeafe"] {
+  background-color: #dbeafe;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+/* Red wavy underline for unapproved words */
+.txt-viewer pre span[style*="#ef4444"] {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #ef4444;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* Document Toolbar */
+.document-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 12px 20px;
+  background: #fafafa;
+  border-top: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+  min-height: 50px;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 30px;
+  background: #d0d0d0;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+  background: #f0f0f0;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+
+.zoom-display {
+  min-width: 45px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: white;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #999;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar-btn:active:not(:disabled) {
+  background: #d8d8d8;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reset-btn {
+  background: var(--color-warning-light);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  transition: all 0.3s ease;
+}
+
+.reset-btn:hover:not(:disabled) {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+  color: white;
+}
+
+/* Pagination Controls */
+.pagination-controls {
+  background: #f0f0f0;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+
+.page-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-input {
+  width: 50px;
+  padding: 6px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.page-input:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 4px rgba(33, 150, 243, 0.3);
+}
+
+.page-info {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+/* Error State */
+.document-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 60px 40px;
+  background: var(--color-error-light);
+  border: 2px dashed var(--color-error);
+  border-radius: 8px;
+  color: var(--color-error);
+  text-align: center;
+  min-height: 300px;
+  transition: all 0.3s ease;
+}
+
+.error-icon {
+  font-size: 48px;
+}
+
+.error-text {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  max-width: 400px;
+}
+
+/* Loading State */
+.document-preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 60px 40px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  color: #666;
+  text-align: center;
+  min-height: 300px;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+  color: #2196f3;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* React PDF Overrides */
+.react-pdf__Document {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.react-pdf__Page {
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  margin: 0 auto;
+}
+
+.react-pdf__Page__textContent {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.react-pdf__Page__annotations {
+  display: none;
+}
+
+/* Annotation and Text Layers */
+.annotationLayer section {
+  position: relative;
+}
+
+.annotationLayer .linkAnnotation > a {
+  position: absolute;
+  font-size: 1em;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  opacity: 0.2;
+  line-height: 1;
+  outline: none;
+}
+
+.annotationLayer .linkAnnotation > a:hover,
+.annotationLayer .linkAnnotation > a:focus {
+  opacity: 0.4;
+  background: yellow;
+}
+
+.textLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1;
+}
+
+.textLayer > span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* Ensure highlighted spans inside PDF textLayer are visible */
+.textLayer span[data-gf-highlight] {
+  color: #111 !important;
+  background: transparent !important;
+  display: inline !important;
+  text-decoration-skip-ink: none;
+}
+
+.textLayer span[style*="#dbeafe"] {
+  background-color: #dbeafe !important;
+  padding: 2px 4px !important;
+  border-radius: 2px !important;
+  color: #111 !important;
+}
+
+.textLayer span[style*="#ef4444"] {
+  text-decoration-line: underline !important;
+  text-decoration-style: wavy !important;
+  text-decoration-color: #ef4444 !important;
+  text-decoration-thickness: 2px !important;
+  text-underline-offset: 2px !important;
+  color: #111 !important;
+}
+
+.textLayer .textDivBrowser {
+  background: yellow;
+  color: transparent;
+}
+
+.textLayer .textDivBrowser::selection,
+.textLayer .textDivBrowser::-moz-selection {
+  background: blue;
+  color: transparent;
+}
+
+.textLayer .textDivBrowser {
+  background: transparent;
+  cursor: text;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .document-preview-container {
+    height: auto;
+    min-height: 500px;
+  }
+
+  .document-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .toolbar-section,
+  .toolbar-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .toolbar-separator {
+    width: 100%;
+    height: 1px;
+  }
+
+  .pdf-viewer-wrapper {
+    padding: 10px;
+  }
+
+  .docx-viewer {
+    padding: 15px;
+    max-width: 100%;
+  }
+
+  .txt-viewer {
+    padding: 10px;
+    max-width: 100%;
+  }
+
+  .zoom-display {
+    min-width: 40px;
+  }
+
+  .page-input {
+    width: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .document-preview-error,
+  .document-preview-loading {
+    padding: 30px 20px;
+    min-height: 200px;
+  }
+
+  .error-icon {
+    font-size: 32px;
+  }
+
+  .error-text {
+    font-size: 14px;
+  }
+
+  .toolbar-btn {
+    padding: 8px;
+    font-size: 12px;
+  }
+}

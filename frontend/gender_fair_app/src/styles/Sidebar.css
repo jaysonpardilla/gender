@@ -1,0 +1,248 @@
+/* Sidebar Styles */
+.sidebar {
+  width: 280px;
+  /* Fixed positioning so sidebar stays visible while scrolling */
+  position: fixed;
+  left: 0;
+  top: 70px; /* height of the top navigation bar */
+  height: calc(100vh - 70px);
+  background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  color: white;
+  z-index: 1000;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+}
+
+.sidebar-header {
+  padding: 24px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Placeholder element used in layout to reserve sidebar width when the
+   real sidebar is fixed and taken out of document flow. */
+.sidebar-placeholder {
+  width: 280px;
+  flex-shrink: 0;
+}
+
+.logo-icon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 18px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.sidebar-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: white;
+}
+
+.sidebar-header p {
+  font-size: 12px;
+  margin: 4px 0 0 0;
+  color: #bdc3c7;
+  font-weight: 500;
+}
+
+.sidebar-section {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: none;
+  background: none;
+  color: #bdc3c7;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  width: 100%;
+}
+
+.menu-item:hover {
+  background: rgba(206, 245, 254, 0.733);
+  color: white;
+  padding-left: 20px;
+}
+
+.menu-item.active {
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+  border-left: 4px solid #667eea;
+  padding-left: 12px;
+}
+
+.menu-item svg {
+  flex-shrink: 0;
+}
+
+/* Resources Section */
+.sidebar-resources {
+  padding: 12px 16px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 0;
+}
+
+.sidebar-resources h4 {
+  font-size: 12px;
+  font-weight: 700;
+  color: #95a5a6;
+  text-transform: uppercase;
+  margin: 0 0 8px 0;
+  letter-spacing: 0.5px;
+}
+
+.resource-item {
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+}
+
+/* Gender Fairness Tip */
+.sidebar-tip {
+  padding: 16px;
+  margin: 16px 12px 16px;
+  background: rgba(102, 126, 234, 0.1); 
+  border-left: 4px solid #667eea;
+  border-radius: 8px;
+  color: #ecf0f1;
+}
+
+.tip-badge {
+  width: 24px;
+  height: 24px;
+  background: #2ecc71;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: white;
+}
+
+.sidebar-tip h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sidebar-tip p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #bdc3c7;
+}
+
+.Profile-Bottom {
+  background: rgba(48, 83, 81, 0.656);
+  border-top: 1px solid rgba(255, 255, 255, 0.1); 
+} 
+
+.menu-item-text{
+  color: #ffffff; 
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* Logout Button */
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin: 16px 12px;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  background: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  font-size: 14px;
+  width: auto;
+}
+
+.logout-btn:hover {
+  background: rgba(231, 76, 60, 0.2);
+  border-color: rgba(231, 76, 60, 0.5);
+}
+
+/* Scrollbar Styling */
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 240px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: -280px;
+    transition: left 0.3s ease;
+  }
+
+  .sidebar-placeholder {
+    display: none;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+
+  .sidebar-header h3 {
+    font-size: 14px;
+  }
+
+  .menu-item {
+    padding: 12px 14px;
+  }
+}
