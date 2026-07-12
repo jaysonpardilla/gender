@@ -136,9 +136,18 @@ export const adminService = {
     return api.get('/admin/dataset/', { params });
   },
 
+  importDatasetFile: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/admin/dataset/import/', formData);
+  },
+
   initDataset: () =>
     api.post('/admin/init-dataset/', {}),
 
   addDatasetMapping: (data: { biased_word: string; fair_word: string }) =>
     api.post('/admin/dataset/', data),
+
+  deleteDatasetMapping: (mappingId: number) =>
+    api.delete(`/admin/dataset/${mappingId}/`),
 };

@@ -36,6 +36,8 @@ urlpatterns = [
     path('admin/support-messages/', views.admin_support_messages_view, name='admin-support-messages'),
     path('admin/support-messages/<int:message_id>/', views.admin_support_message_view, name='admin-support-message'),
     path('admin/dataset/', views.admin_dataset_view, name='admin-dataset'),
+    path('admin/dataset/<int:mapping_id>/', views.admin_dataset_mapping_view, name='admin-dataset-mapping'),
+    path('admin/dataset/import/', views.admin_dataset_import_view, name='admin-dataset-import'),
     path('admin/init-dataset/', views.init_dataset_view, name='init-dataset'),
     
     # Health check

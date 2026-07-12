@@ -65,7 +65,6 @@ const Sidebar: React.FC<SidebarProps> = () => {
           ))}
         </nav> 
         <div className="sidebar-resources">
-          <h4>RESOURCES</h4>
           <nav className="sidebar-menu">
             {resources.map((item) => (
               <button

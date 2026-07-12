@@ -7,8 +7,22 @@ from io import BytesIO
 import textwrap
 import logging
 
-# Get the path to the dataset - file is in backend/ directory, not genderFairProject/
-DATASET_PATH = Path(__file__).resolve().parent.parent.parent / 'gender_fair_dataset_300.xls'
+# Prefer a writable workbook in the backend root. The legacy .xls file is still supported as a fallback.
+DATASET_DIR = Path(__file__).resolve().parent.parent.parent
+DEFAULT_DATASET_PATH = DATASET_DIR / 'gender_fair_dataset_300.xlsx'
+LEGACY_DATASET_PATH = DATASET_DIR / 'gender_fair_dataset_300.xls'
+DATASET_PATH = DEFAULT_DATASET_PATH
+
+
+def resolve_dataset_path(target_path=None):
+    if target_path:
+        return Path(target_path)
+
+    for candidate in [DEFAULT_DATASET_PATH, LEGACY_DATASET_PATH]:
+        if candidate.exists():
+            return candidate
+
+    return DEFAULT_DATASET_PATH
 
 
 def load_dataset_to_db():
@@ -19,19 +33,19 @@ def load_dataset_to_db():
     """
     if BiasedWordMapping.objects.exists():
         return  # Already loaded
-    
-    # Check if dataset file exists
-    if not DATASET_PATH.exists():
-        print(f"Dataset file not found at {DATASET_PATH}. Skipping dataset loading.")
+
+    dataset_path = resolve_dataset_path()
+    if not dataset_path.exists():
+        print(f"Dataset file not found at {dataset_path}. Skipping dataset loading.")
         return
-    
+
     try:
-        file_ext = DATASET_PATH.suffix.lower()
-        
+        file_ext = dataset_path.suffix.lower()
+
         if file_ext == '.xls':
             # Use xlrd for old Excel format
             import xlrd
-            workbook = xlrd.open_workbook(str(DATASET_PATH))
+            workbook = xlrd.open_workbook(str(dataset_path))
             worksheet = workbook.sheet_by_index(0)
             
             # Skip header row and load mappings
@@ -57,7 +71,7 @@ def load_dataset_to_db():
         
         else:  # .xlsx format
             import openpyxl
-            wb = openpyxl.load_workbook(str(DATASET_PATH))
+            wb = openpyxl.load_workbook(str(dataset_path))
             ws = wb.active
             
             # Skip header row and load mappings
@@ -82,12 +96,48 @@ def load_dataset_to_db():
             print(f"  Loaded {loaded} new mappings, skipped {skipped} duplicates")
         
         count = BiasedWordMapping.objects.count()
+        try:
+            cache.delete('gender_fair_dataset')
+        except Exception:
+            pass
         print(f"Loaded {count} biased word mappings from dataset.")
     
     except ImportError as ie:
         print(f"Error: Missing library - {ie}. Install with: pip install xlrd openpyxl")
     except Exception as e:
         print(f"Error loading dataset: {e}")
+
+
+def append_mapping_to_excel(biased_word, fair_word):
+    """
+    Append a new biased word mapping to the Excel dataset file.
+    Returns True on success, False on failure.
+    """
+    dataset_path = resolve_dataset_path()
+    if not dataset_path.exists():
+        logger = logging.getLogger('gender_fair_app.utils')
+        logger.warning(f"Cannot append mapping: dataset file not found at {dataset_path}")
+        return False
+
+    try:
+        if dataset_path.suffix.lower() == '.xlsx':
+            import openpyxl
+            wb = openpyxl.load_workbook(str(dataset_path))
+            ws = wb.active
+            next_row = ws.max_row + 1
+            ws.cell(row=next_row, column=1, value=next_row - 1)
+            ws.cell(row=next_row, column=2, value=biased_word)
+            ws.cell(row=next_row, column=3, value=fair_word)
+            wb.save(str(dataset_path))
+            return True
+        else:
+            logger = logging.getLogger('gender_fair_app.utils')
+            logger.warning("Appending to .xls is not supported. Convert dataset to .xlsx to enable updates.")
+            return False
+    except Exception as e:
+        logger = logging.getLogger('gender_fair_app.utils')
+        logger.error(f"Failed to append mapping to Excel: {e}")
+        return False
 
 
 def get_dataset_dict():
@@ -123,56 +173,416 @@ def get_dataset_dict():
 
 def get_dataset_from_excel():
     """
-    Read dataset directly from the original .xls file.
-    Returns list of dicts with biased_word and fair_word.
+    Return the dataset rows from the database, falling back to loading from the
+    legacy Excel file when the database is still empty.
     """
     try:
-        import xlrd
-        mappings = []
+        if not BiasedWordMapping.objects.exists():
+            load_dataset_to_db()
 
-        if DATASET_PATH.exists():
-            logger = logging.getLogger('gender_fair_app.utils')
-            logger.info(f"Reading from .xls file: {DATASET_PATH}")
-            try:
-                workbook = xlrd.open_workbook(str(DATASET_PATH))
-                worksheet = workbook.sheet_by_index(0)
-                for row_idx in range(1, worksheet.nrows):
-                    raw_id = worksheet.cell_value(row_idx, 0)
-                    row_id = None
-                    try:
-                        row_id = int(raw_id)
-                    except Exception:
-                        try:
-                            row_id = int(float(raw_id))
-                        except Exception:
-                            row_id = None
-
-                    biased_word = str(worksheet.cell_value(row_idx, 1)).strip().lower()
-                    fair_word = str(worksheet.cell_value(row_idx, 2)).strip()
-                    if biased_word and fair_word:
-                        mappings.append({
-                            'id': row_id,
-                            'biased_word': biased_word,
-                            'fair_word': fair_word
-                        })
-                return mappings
-            except Exception as e:
-                logger.warning(f"Error reading .xls file: {e}")
-
-        return []
+        mappings = BiasedWordMapping.objects.all().order_by('biased_word')
+        return [
+            {
+                'id': mapping.id,
+                'biased_word': mapping.biased_word,
+                'fair_word': mapping.fair_word,
+            }
+            for mapping in mappings
+        ]
     except Exception as e:
         logger = logging.getLogger('gender_fair_app.utils')
-        logger.error(f"Failed to read from excel: {e}")
+        logger.error(f"Failed to read dataset from database: {e}")
         return []
+
+
+def _normalize_excel_cell_value(value):
+    if value is None:
+        return ''
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
+    return str(value).strip()
+
+
+def _log_dataset_snapshot(label, rows):
+    logger = logging.getLogger('gender_fair_app.utils')
+    normalized_rows = [[_normalize_excel_cell_value(cell) for cell in row] for row in rows]
+    logger.info(f"📄 {label} | rows={normalized_rows}")
+    print(f"[DATASET IMPORT] {label}")
+    for row in normalized_rows:
+        print(f"  {row}")
+    if not normalized_rows:
+        print('  <empty>')
+
+
+def _is_excel_header_row(row):
+    """
+    Detect if a row is a header row by looking for known header keywords.
+    Uses exact word matching, not substring matching.
+    """
+    normalized = [_normalize_excel_cell_value(cell).lower() for cell in row]
+    
+    # Exact header keywords (full word matches, not substrings)
+    header_keywords = {
+        'id',
+        'gendered_term',
+        'gender_fair_term',
+        'biased_word',
+        'biased word',
+        'fair_word',
+        'fair word',
+        'fair alternative',
+        'gender fair term',
+    }
+
+    # Check for exact matches only (full words, case-insensitive)
+    for cell in normalized:
+        # Normalize: remove leading/trailing spaces, convert to lowercase
+        cell_lower = cell.lower().strip()
+        
+        # Exact match check
+        if cell_lower in header_keywords:
+            return True
+        
+        # Check if any header keyword is a standalone word in the cell
+        # e.g., "gendered_term" or "gendered term" should match, but "fairterm1" should NOT
+        for keyword in header_keywords:
+            # Split by spaces and check if keyword appears as a complete word
+            cell_words = set(cell_lower.replace('_', ' ').split())
+            keyword_words = set(keyword.replace('_', ' ').split())
+            if keyword_words <= cell_words:  # keyword is subset of cell words
+                return True
+    
+    # Check for pattern: [id, gender*, fair*] or [id, biased*, fair*]
+    if len(normalized) >= 2:
+        cell0_lower = normalized[0].lower().replace('_', ' ')
+        cell1_lower = normalized[1].lower().replace('_', ' ')
+        
+        if 'id' in cell0_lower:
+            if ('gender' in cell1_lower or 'biased' in cell1_lower):
+                return True
+
+    return False
+
+
+def _extract_mappings_from_excel_file(uploaded_file):
+    logger = logging.getLogger('gender_fair_app.utils')
+    
+    # CRITICAL DEBUG: Verify we're reading from the uploaded file, not a default location
+    file_name = getattr(uploaded_file, 'name', 'unknown')
+    file_id = id(uploaded_file)  # Python object id to track if it's the same object
+    
+    logger.info(f"📥 === EXTRACTION START === | file_name={file_name} | object_id={file_id}")
+    logger.info(f"📥 File object type: {type(uploaded_file)}")
+    logger.info(f"📥 File object has 'read' method: {hasattr(uploaded_file, 'read')}")
+    
+    # CRITICAL: Read the first 100 bytes to verify what file is actually being read
+    try:
+        uploaded_file.seek(0)
+        first_bytes = uploaded_file.read(100)
+        uploaded_file.seek(0)  # Reset for actual extraction
+        logger.info(f"📥 First 100 bytes of file (hex): {first_bytes[:100].hex()}")
+        logger.info(f"📥 First 100 bytes decoded: {first_bytes[:100]}")
+    except Exception as e:
+        logger.error(f"📥 Failed to peek at file bytes: {e}")
+    
+    # Make sure we're at the start of the file
+    try:
+        uploaded_file.seek(0)
+        current_pos = uploaded_file.tell()
+        logger.info(f"📥 File seek successful | position={current_pos}")
+    except Exception as e:
+        logger.error(f"📥 File seek FAILED: {e}")
+        raise
+    
+    ext = Path(file_name).suffix.lower() if file_name else ''
+    logger.info(f"📥 File extension: {ext}")
+
+    rows = []
+    if ext == '.xlsx':
+        import openpyxl
+        try:
+            workbook = openpyxl.load_workbook(uploaded_file, data_only=True)
+            sheet = workbook.active
+            rows = list(sheet.iter_rows(values_only=True))
+            logger.info(f"📥 XLSX loaded | sheet_name={sheet.title} | rows={len(rows)} | max_col={sheet.max_column}")
+        except Exception as e:
+            logger.error(f"📥 XLSX load failed: {e}")
+            raise
+            
+    elif ext == '.xls':
+        import xlrd
+        try:
+            file_bytes = uploaded_file.read()
+            logger.info(f"📥 XLS bytes read | total_bytes={len(file_bytes)}")
+            workbook = xlrd.open_workbook(file_contents=file_bytes)
+            sheet = workbook.sheet_by_index(0)
+            rows = [
+                [sheet.cell_value(row_idx, col_idx) for col_idx in range(sheet.ncols)]
+                for row_idx in range(sheet.nrows)
+            ]
+            logger.info(f"📥 XLS loaded | rows={len(rows)} | ncols={sheet.ncols} | nrows={sheet.nrows}")
+        except Exception as e:
+            logger.error(f"📥 XLS load failed: {e}")
+            raise
+    else:
+        raise ValueError(f'Unsupported file type: {ext}')
+
+    # Log ALL rows - but cap at showing first 10 and last row to avoid spam
+    logger.info(f"📥 ALL {len(rows)} ROWS FROM FILE:")
+    if len(rows) <= 12:
+        # If <= 12 rows total, show all
+        for idx, row in enumerate(rows):
+            normalized = [_normalize_excel_cell_value(cell) for cell in row]
+            logger.info(f"📥   ROW[{idx}]: {normalized}")
+    else:
+        # If > 12 rows, show first 5, then "..." then last row
+        for idx in range(min(5, len(rows))):
+            normalized = [_normalize_excel_cell_value(cell) for cell in rows[idx]]
+            logger.info(f"📥   ROW[{idx}]: {normalized}")
+        logger.info(f"📥   ... ({len(rows) - 6} rows omitted) ...")
+        normalized = [_normalize_excel_cell_value(cell) for cell in rows[-1]]
+        logger.info(f"📥   ROW[{len(rows)-1}]: {normalized}")
+    
+    mappings = []
+    header_row = None
+    has_detected_headers = False
+    
+    # First pass: check if any row looks like a header
+    for row_idx, row in enumerate(rows[:5]):  # Check first 5 rows only
+        if _is_excel_header_row(row):
+            header_row = [_normalize_excel_cell_value(cell).lower() for cell in row]
+            has_detected_headers = True
+            logger.info(f"📥 ROW[{row_idx}] HEADER DETECTED: {header_row}")
+            break
+    
+    if not has_detected_headers:
+        logger.info(f"📥 NO HEADERS DETECTED - treating all rows as data")
+    
+    for row_idx, row in enumerate(rows):
+        if not row:
+            logger.info(f"📥 ROW[{row_idx}] SKIPPED: empty row")
+            continue
+        
+        # Skip header row if we detected one
+        if has_detected_headers and header_row and row_idx < 5:
+            if _is_excel_header_row(row):
+                logger.info(f"📥 ROW[{row_idx}] SKIPPED: header row")
+                continue
+
+        values = [_normalize_excel_cell_value(cell) for cell in row]
+        if not values or all(v == '' for v in values):
+            logger.info(f"📥 ROW[{row_idx}] SKIPPED: all values empty")
+            continue
+
+        logger.info(f"📥 ROW[{row_idx}] VALUES: {values}")
+
+        biased_idx = None
+        fair_idx = None
+        
+        # Only try header-based detection if we have headers
+        if has_detected_headers and header_row:
+            for idx, header in enumerate(header_row):
+                if idx >= len(values):
+                    continue
+                normalized_header = header.replace(' ', '_')
+                if normalized_header in {'biased_word', 'gendered_term', 'gendered_term', 'biased_word', 'biased', 'term'}:
+                    biased_idx = idx
+                if normalized_header in {'fair_word', 'gender_fair_term', 'gender_fair_term', 'fair', 'replacement', 'fair alternative'}:
+                    fair_idx = idx
+            if biased_idx is None:
+                for idx, header in enumerate(header_row):
+                    if idx >= len(values):
+                        continue
+                    if 'biased' in header or 'gender' in header or 'term' in header:
+                        biased_idx = idx
+            if fair_idx is None:
+                for idx, header in enumerate(header_row):
+                    if idx >= len(values):
+                        continue
+                    if 'fair' in header or 'replacement' in header or 'alternative' in header:
+                        fair_idx = idx
+            logger.info(f"📥 ROW[{row_idx}] HEADER-BASED: biased_idx={biased_idx}, fair_idx={fair_idx}")
+
+        # If no headers detected, use column positions directly
+        if biased_idx is None and fair_idx is None:
+            if len(values) >= 2:
+                biased_idx, fair_idx = 0, 1
+                logger.info(f"📥 ROW[{row_idx}] NO-HEADER MODE: biased_idx=0, fair_idx=1")
+            elif len(values) == 1:
+                biased_idx, fair_idx = 0, 0
+                logger.info(f"📥 ROW[{row_idx}] AUTO-DETECT: 1 col → biased_idx=0, fair_idx=0")
+            else:
+                logger.info(f"📥 ROW[{row_idx}] SKIPPED: not enough columns")
+                continue
+
+        if biased_idx is None:
+            biased_idx = 0
+        if fair_idx is None:
+            fair_idx = 1 if len(values) > 1 else 0
+
+        biased_word = values[biased_idx].strip().lower() if biased_idx < len(values) else ''
+        fair_word = values[fair_idx].strip() if fair_idx < len(values) else ''
+        
+        logger.info(f"📥 ROW[{row_idx}] EXTRACTED: biased='{biased_word}' (from col {biased_idx}), fair='{fair_word}' (from col {fair_idx})")
+        
+        if biased_word and fair_word:
+            mappings.append((biased_word, fair_word))
+            logger.info(f"📥 ROW[{row_idx}] ✅ ADDED TO MAPPINGS")
+        else:
+            logger.info(f"📥 ROW[{row_idx}] ❌ REJECTED: empty biased_word or fair_word")
+
+    logger.info(f"📥 === EXTRACTION END === | total_mappings={len(mappings)}")
+    return mappings
+
+
+def _read_existing_rows_from_path(path):
+    path = Path(path)
+    if not path.exists():
+        return [], None
+
+    ext = path.suffix.lower()
+    if ext == '.xlsx':
+        from openpyxl import load_workbook
+        workbook = load_workbook(path, data_only=True)
+        sheet = workbook.active
+        rows = list(sheet.iter_rows(values_only=True))
+        return rows, workbook
+
+    if ext == '.xls':
+        import xlrd
+        with open(path, 'rb') as handle:
+            workbook = xlrd.open_workbook(file_contents=handle.read())
+        sheet = workbook.sheet_by_index(0)
+        rows = [
+            [sheet.cell_value(row_idx, col_idx) for col_idx in range(sheet.ncols)]
+            for row_idx in range(sheet.nrows)
+        ]
+        return rows, workbook
+
+    return [], None
+
+
+def _write_rows_to_path(path, rows):
+    path = Path(path)
+    ext = path.suffix.lower()
+    if ext == '.xlsx':
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            logger = logging.getLogger('gender_fair_app.utils')
+            logger.warning('openpyxl is unavailable, falling back to .xls output path')
+            return _write_rows_to_path(path.with_suffix('.xls'), rows)
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = 'Sheet1'
+        for row in rows:
+            sheet.append([_normalize_excel_cell_value(value) for value in row])
+        workbook.save(path)
+        return True
+
+    if ext == '.xls':
+        import xlwt
+        workbook = xlwt.Workbook()
+        sheet = workbook.add_sheet('Sheet1')
+        for row_idx, row in enumerate(rows):
+            for col_idx, value in enumerate(row):
+                sheet.write(row_idx, col_idx, value)
+        workbook.save(str(path))
+        return True
+
+    raise ValueError('Unsupported file type. Please save the dataset as .xls or .xlsx.')
+
+
+def append_mappings_to_excel_file(uploaded_file, target_path=None, merge_existing=True):
+    """
+    Append mappings from an uploaded Excel file to the dataset workbook.
+    
+    ⚠️ CRITICAL: This function ONLY reads from the uploaded file.
+    It NEVER loads default dataset files or reads from disk.
+    
+    If merge_existing=False, only the uploaded file content is imported (no merging with existing data).
+    If merge_existing=True, new mappings are merged with existing dataset rows.
+    """
+    logger = logging.getLogger('gender_fair_app.utils')
+    
+    # ⚠️ CRITICAL: Do NOT call load_dataset_to_db() here - only read uploaded file
+    logger.info(f"📤 IMPORT REQUEST | file={getattr(uploaded_file, 'name', 'unknown')} | merge_existing={merge_existing}")
+    logger.info(f"📤 ⚠️ CRITICAL: Will only read from UPLOADED FILE, not from default dataset file")
+    
+    xls_path = Path(resolve_dataset_path(target_path))
+
+    # Preserve the existing dataset format for legacy .xls files.
+    # Only fallback from .xlsx to .xls if openpyxl is unavailable.
+    if xls_path.suffix.lower() == '.xlsx':
+        try:
+            import importlib.util
+            if importlib.util.find_spec('openpyxl') is None:
+                logger.warning('openpyxl not installed; falling back to .xls storage')
+                xls_path = xls_path.with_suffix('.xls')
+        except Exception:
+            pass
+
+    try:
+        # ✅ Extract ONLY from uploaded file - DO NOT load any default files
+        imported_mappings = _extract_mappings_from_excel_file(uploaded_file)
+        logger.info(f"📤 IMPORTED MAPPINGS | count={len(imported_mappings)} | mappings={imported_mappings}")
+        
+        if not imported_mappings:
+            logger.warning('append_mappings_to_excel_file received no valid mappings to import')
+            return False
+
+        added_rows = 0
+        updated_rows = 0
+
+        # Save all mappings from uploaded file directly to database
+        for biased_word, fair_word in imported_mappings:
+            if not biased_word or not fair_word:
+                continue
+
+            obj, created = BiasedWordMapping.objects.update_or_create(
+                biased_word=biased_word,
+                defaults={'fair_word': fair_word}
+            )
+            
+            if created:
+                added_rows += 1
+                logger.info(f"✅ Added new mapping: {biased_word} → {fair_word}")
+            elif obj.fair_word != fair_word:
+                obj.fair_word = fair_word
+                obj.save()
+                updated_rows += 1
+                logger.info(f"🔄 Updated mapping: {biased_word} → {fair_word}")
+
+        # Clear cache to reflect new data
+        try:
+            cache.delete('gender_fair_dataset')
+        except Exception:
+            pass
+
+        result = {
+            'success': True,
+            'imported_rows': len(imported_mappings),
+            'added_rows': added_rows,
+            'updated_rows': updated_rows,
+            'changed': (added_rows + updated_rows) > 0,
+        }
+
+        logger.info(f'✅ Import complete: added {added_rows} new mappings, updated {updated_rows} existing mappings from uploaded file')
+        return result
+        
+    except Exception as e:
+        logger.error(f'Failed to import mappings from file: {e}', exc_info=True)
+        return False
 
 
 def append_mapping_to_excel(biased_word: str, fair_word: str):
     """
-    Append a new mapping directly to the original .xls dataset file.
+    Append a new mapping to the database.
     """
     logger = logging.getLogger('gender_fair_app.utils')
-    xls_path = DATASET_PATH
-
     biased_word = biased_word.strip()
     fair_word = fair_word.strip()
     if not biased_word or not fair_word:
@@ -183,124 +593,20 @@ def append_mapping_to_excel(biased_word: str, fair_word: str):
         logger.warning('append_mapping_to_excel rejected test values ending with -direct')
         return False
 
-    def _import_xlwt():
-        try:
-            import xlwt
-            return xlwt
-        except ImportError:
-            try:
-                import subprocess
-                import sys
-                logger.warning('xlwt not installed in runtime environment. Attempting install...')
-                subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'xlwt'])
-                import xlwt as xlwt_retry
-                return xlwt_retry
-            except Exception as install_error:
-                logger.error(f'Unable to install xlwt at runtime: {install_error}')
-                return None
+    obj, created = BiasedWordMapping.objects.update_or_create(
+        biased_word=biased_word,
+        defaults={'fair_word': fair_word}
+    )
+    if not created and obj.fair_word != fair_word:
+        obj.fair_word = fair_word
+        obj.save()
 
     try:
-        import xlrd
-    except ImportError:
-        logger.error('xlrd is required to read .xls files.')
-        return False
+        cache.delete('gender_fair_dataset')
+    except Exception:
+        pass
 
-    xlwt = _import_xlwt()
-    if xlwt is None:
-        return False
-
-    temp_path = xls_path.with_suffix('.tmp.xls')
-    workbook = None
-    worksheet = None
-    try:
-        if xls_path.exists():
-            with open(str(xls_path), 'rb') as f:
-                file_bytes = f.read()
-            workbook = xlrd.open_workbook(file_contents=file_bytes)
-            worksheet = workbook.sheet_by_index(0)
-            wb = xlwt.Workbook()
-            ws = wb.add_sheet(worksheet.name if worksheet.name else 'Sheet1')
-
-            existing_ids = []
-            for row_idx in range(worksheet.nrows):
-                for col_idx in range(worksheet.ncols):
-                    value = worksheet.cell_value(row_idx, col_idx)
-                    if col_idx == 0 and isinstance(value, float) and value.is_integer():
-                        value = int(value)
-                    ws.write(row_idx, col_idx, value)
-                if row_idx > 0:
-                    raw_id = worksheet.cell_value(row_idx, 0)
-                    try:
-                        existing_ids.append(int(raw_id))
-                    except Exception:
-                        try:
-                            existing_ids.append(int(float(raw_id)))
-                        except Exception:
-                            pass
-            next_row = worksheet.nrows
-            next_id = max(existing_ids) + 1 if existing_ids else 1
-        else:
-            wb = xlwt.Workbook()
-            ws = wb.add_sheet('Sheet1')
-            ws.write(0, 0, 'id')
-            ws.write(0, 1, 'gendered_term')
-            ws.write(0, 2, 'gender_fair_term')
-            next_row = 1
-            next_id = 1
-
-        id_style = xlwt.easyxf(num_format_str='0')
-        ws.write(next_row, 0, next_id, id_style)
-        ws.write(next_row, 1, biased_word)
-        ws.write(next_row, 2, fair_word)
-        wb.save(str(temp_path))
-
-        if workbook is not None:
-            try:
-                workbook.release_resources()
-            except Exception:
-                pass
-            try:
-                workbook.close()
-            except Exception:
-                pass
-        del workbook
-        del worksheet
-
-        try:
-            if xls_path.exists():
-                os.chmod(str(xls_path), 0o666)
-                os.remove(str(xls_path))
-        except Exception as rm_error:
-            logger.warning(f'Unable to remove existing xls file before replace: {rm_error}')
-
-        try:
-            os.replace(str(temp_path), str(xls_path))
-        except Exception as replace_error:
-            logger.warning(f'os.replace failed: {replace_error}. Trying os.rename.', exc_info=True)
-            try:
-                if xls_path.exists():
-                    os.chmod(str(xls_path), 0o666)
-                    os.remove(str(xls_path))
-            except Exception:
-                pass
-            os.rename(str(temp_path), str(xls_path))
-
-        logger.info(f'Successfully appended mapping to .xls file: {xls_path} with id {next_id}')
-
-        try:
-            cache.delete('gender_fair_dataset')
-        except Exception:
-            pass
-
-        return True
-    except Exception as e:
-        logger.error(f'Failed to append mapping to excel: {e}', exc_info=True)
-        try:
-            if temp_path.exists():
-                temp_path.unlink()
-        except Exception:
-            pass
-        return False
+    return True
 
 
 def tokenize_text(text):

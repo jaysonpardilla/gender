@@ -1,12 +1,11 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useMemo, Fragment, useRef } from 'react';
+import { useState, useEffect, useMemo, Fragment, useRef, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Settings, Users, TrendingUp } from 'lucide-react';
 import { adminService, authService } from '../services/authService';
 import Navigation from '../components/Navigation';
-import Footer from '../components/Footer';
 import '../styles/UserDashboard.css';
 
 interface User {
@@ -14,7 +13,8 @@ interface User {
   email: string;
   first_name: string;
   last_name: string;
-  profile: { role: string };
+  role?: string;
+  profile?: { role?: string };
   documents_count?: number;
   last_processed_at?: string | null;
   last_document_name?: string | null;
@@ -54,6 +54,8 @@ interface SupportMessage {
   created_at: string;
   is_resolved: boolean;
 }
+
+type AdminTab = 'analytics' | 'users' | 'dataset' | 'support';
 
 const chartMargins = { top: 20, right: 20, bottom: 40, left: 42 };
 const lineChartMargins = { top: 14, right: 8, bottom: 24, left: 10 };
@@ -144,8 +146,13 @@ const buildPieSegments = (
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'dataset' | 'support'>('analytics');
-  const tabs = ['analytics', 'users', 'dataset', 'support'] as const;
+  const [activeTab, setActiveTab] = useState<AdminTab>('analytics');
+  const tabs: Array<{ id: AdminTab; label: string; icon: typeof Users }> = [
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'dataset', label: 'Dataset', icon: Settings },
+    { id: 'support', label: 'Support', icon: FileText },
+  ];
   const [users, setUsers] = useState<User[]>([]);
   const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
@@ -153,6 +160,7 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [supportPage, setSupportPage] = useState(1);
   const [datasetPage, setDatasetPage] = useState(1);
@@ -164,6 +172,18 @@ export default function AdminDashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newBiasedWord, setNewBiasedWord] = useState('');
   const [newFairWord, setNewFairWord] = useState('');
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateMessage, setDuplicateMessage] = useState('');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    imported_rows: number;
+    added_rows: number;
+    updated_rows: number;
+    changed: boolean;
+  } | null>(null);
+  const [fileValidationError, setFileValidationError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ label: string; value: number } | null>(null);
   const lineChartRef = useRef<HTMLDivElement | null>(null);
 
@@ -221,6 +241,79 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setFileValidationError('');
+    setImportResult(null);
+
+    if (!file) {
+      setImportFile(null);
+      return;
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (!extension || !['xls', 'xlsx'].includes(extension)) {
+      setFileValidationError('Please select a .xls or .xlsx file.');
+      setImportFile(null);
+      event.target.value = '';
+      return;
+    }
+
+    setImportFile(file);
+  };
+
+  const handleDeleteMapping = async (mappingId: number) => {
+    if (!window.confirm('Delete this dataset mapping?')) return;
+
+    try {
+      await adminService.deleteDatasetMapping(mappingId);
+      setMappings((prev) => prev.filter((mapping) => mapping.id !== mappingId));
+      setSuccessMessage('Mapping deleted successfully.');
+      setError('');
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Failed to delete mapping.');
+    }
+  };
+
+  const handleImportDataset = async () => {
+    setError('');
+    setSuccessMessage('');
+    setImportResult(null);
+
+    if (!importFile) {
+      setFileValidationError('Please choose an .xls or .xlsx file to import.');
+      return;
+    }
+
+    setFileValidationError('');
+    setImportLoading(true);
+
+    try {
+      const res = await adminService.importDatasetFile(importFile);
+      const data = res.data;
+      setImportResult({
+        imported_rows: data.imported_rows || 0,
+        added_rows: data.added_rows || 0,
+        updated_rows: data.updated_rows || 0,
+        changed: data.changed ?? false,
+      });
+      setSuccessMessage('Dataset import completed successfully.');
+      window.setTimeout(() => {
+        setSuccessMessage('');
+      }, 4000);
+      setImportFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      await loadTabData();
+    } catch (err: any) {
+      const message = err?.response?.data?.error || 'Import failed. Please check the file and try again.';
+      setError(message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!authService.isAuthenticated() || user?.profile?.role !== 'admin') {
       navigate('/login');
@@ -228,11 +321,32 @@ export default function AdminDashboard() {
   }, [navigate, user]);
 
   useEffect(() => {
+    if (!authService.isAuthenticated() || user?.profile?.role !== 'admin') {
+      return;
+    }
+
     const fetchData = async () => {
       await loadTabData();
     };
-    fetchData();
-  }, [activeTab]);
+
+    void fetchData();
+
+    if (activeTab === 'analytics') {
+      const intervalId = window.setInterval(() => {
+        void fetchData();
+      }, 15000);
+
+      const handleFocus = () => {
+        void fetchData();
+      };
+
+      window.addEventListener('focus', handleFocus);
+      return () => {
+        window.clearInterval(intervalId);
+        window.removeEventListener('focus', handleFocus);
+      };
+    }
+  }, [activeTab, user?.profile?.role]);
 
   const handleLogout = () => {
     authService.logout();
@@ -266,49 +380,69 @@ export default function AdminDashboard() {
   const datasetPageCount = Math.max(1, Math.ceil(filteredMappings.length / datasetPerPage));
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-slate-50">
       <Navigation userEmail={userEmail} userInitials={getUserInitials()} onLogout={handleLogout} />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
-          <h1 className="text-2xl font-bold text-purple-700 m-0 mt-8 mb-2">Admin Dashboard</h1>
-        
-        {/* Tabs */}
-        <div className="flex gap-4 mb-4 border-b overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => {
-                setActiveTab(tab);
-                if (tab === 'users') {
-                  setCurrentPage(1);
-                }
-                if (tab === 'support') {
-                  setSupportPage(1);
-                  setExpandedSupportIds([]);
-                }
-              }}
-              className={`pb-2 px-4 font-medium border-b-2 transition whitespace-nowrap ${
-                activeTab === tab
-                  ? 'border-purple-600 text-purple-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-lg">
-            {error}
+      <div className="relative min-h-[calc(100vh-70px)] pt-24">
+        <aside className="fixed left-0 top-[70px] h-[calc(100vh-70px)] w-72 overflow-y-auto border-r border-slate-200 bg-slate-900 p-4 text-white shadow-2xl">
+          <div className="mb-6 border-b border-white/10 pb-4">
+            <h2 className="mt-2 text-xl font-semibold text-white">Admin Dashboard</h2>
           </div>
-        )}
+          <nav className="space-y-2">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    if (tab.id === 'users') {
+                      setCurrentPage(1);
+                    }
+                    if (tab.id === 'support') {
+                      setSupportPage(1);
+                      setExpandedSupportIds([]);
+                    }
+                    if (tab.id === 'dataset') {
+                      setDatasetPage(1);
+                    }
+                    setSuccessMessage('');
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
+                    activeTab === tab.id
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-950/20'
+                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <Icon size={18} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
 
-        {loading && <p className="text-center text-gray-500 py-8">Loading...</p>}
+        <main className="w-full max-w-full overflow-x-hidden px-4 pb-8 sm:px-6 lg:ml-72 lg:w-[calc(100%-18rem)] lg:px-8 lg:pr-6">
+          {error && (
+            <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-600">
+              {error}
+            </div>
+          )}
+          {successMessage && (
+            <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">
+              {successMessage}
+            </div>
+          )}
 
-        {/* Analytics Tab */}
-        {activeTab === 'analytics' && analytics && !loading && (
-          <>
-            <div className="grid-stats-5col">
+          {loading && <p className="py-8 text-center text-gray-500">Loading...</p>}
+
+            {/* Analytics Tab */}
+          {activeTab === 'analytics' && analytics && !loading && (
+            <> 
+            <div className="mb-6 pr-2">
+              <h1 className="m-0 text-2xl font-bold text-purple-700">Admin Dashboard</h1>
+            </div>
+            <div className="grid-stats-5col"> 
+              
               <div className="stat-card dashboard lightblue">
                 <div className="stat-card-top">
                   <div className="stat-card-icon"><Users size={22} /></div>
@@ -366,6 +500,7 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+
             <div className="grid-charts-70-30">
               <div className="card-lightblue rounded-2xl shadow border border-slate-200 overflow-hidden">
                 <div className="px-6 py-6">
@@ -377,7 +512,7 @@ export default function AdminDashboard() {
                     <span className="text-xs text-slate-500">Daily cumulative</span>
                   </div>
                 </div>
-                <div className="h-64 w-full relative" ref={lineChartRef}>
+                <div className="h-64 w-full relative py-4" ref={lineChartRef}>
                   <svg viewBox="0 0 700 260" className="w-full h-full">
                     <defs>
                       <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
@@ -526,8 +661,8 @@ export default function AdminDashboard() {
                   <span className="text-xs text-slate-500">Live data</span>
                 </div>
                 <div className="flex flex-col xl:flex-row items-center gap-6">
-                  <div className="w-full max-w-[220px] mx-auto">
-                    <svg viewBox="0 0 220 220" className="w-full h-full">
+                  <div className="mx-auto w-full max-w-[300px]">
+                    <svg viewBox="0 0 200 200" className="h-full w-full">
                       {buildPieSegments(
                         analytics.bias_categories_distribution.map((item) => ({ label: item.category, value: item.count })),
                         90,
@@ -545,7 +680,7 @@ export default function AdminDashboard() {
                       0,
                       110
                     ).map((segment) => (
-                      <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-300 px-4 py-2">
+                      <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-300 px-1 py-1">
                         <div className="flex items-center gap-3">
                           <svg className="h-3 w-3" viewBox="0 0 6 6" aria-hidden="true">
                             <circle cx="3" cy="3" r="3" fill={segment.color} />
@@ -568,8 +703,8 @@ export default function AdminDashboard() {
                   <span className="text-xs text-slate-500">Live data</span>
                 </div>
                 <div className="flex flex-col xl:flex-row items-center gap-6">
-                  <div className="w-full max-w-[220px] mx-auto relative">
-                    <svg viewBox="0 0 220 220" className="w-full h-full">
+                  <div className="relative mx-auto w-full max-w-[300px]">
+                    <svg viewBox="0 0 220 220" className="h-full w-full">
                       {buildPieSegments(
                         analytics.document_type_breakdown
                           .filter((item) => item.type?.toLowerCase() !== 'other')
@@ -601,10 +736,10 @@ export default function AdminDashboard() {
                         50,
                         110
                       ).map((segment) => (
-                        <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                        <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-300 px-2 py-1">
                           <div className="flex items-center gap-3">
-                            <svg className="h-3 w-3" viewBox="0 0 6 6" aria-hidden="true">
-                              <circle cx="3" cy="3" r="3" fill={segment.color} />
+                            <svg className="h-5 w-5" viewBox="0 0 8 8" aria-hidden="true">
+                              <circle cx="5" cy="5" r="5" fill={segment.color} />
                             </svg>
                             <span className="text-sm text-slate-700">{segment.label}</span>
                           </div>
@@ -646,8 +781,14 @@ export default function AdminDashboard() {
         )}
 
         {/* Users Tab */}
-        {activeTab === 'users' && !loading && (
+        {activeTab === 'users' && !loading && (  
+          <>
+          <div className="mb-6 pr-2">
+            <h1 className="m-0 text-2xl font-bold text-purple-700">All Registered Users</h1>
+          </div> 
+
           <div className="table-container bg-white rounded-3xl shadow border border-slate-200 overflow-hidden">
+            
             <table className="dashboard-table w-full text-left text-sm">
               <thead>
                 <tr>
@@ -666,8 +807,8 @@ export default function AdminDashboard() {
                     <td className="dashboard-table-cell font-medium text-slate-900">{usr.email}</td>
                     <td className="dashboard-table-cell text-slate-700">{usr.first_name} {usr.last_name}</td>
                     <td className="dashboard-table-cell">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${usr.profile?.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
-                        {usr.profile?.role || 'user'}
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${(usr.role || usr.profile?.role || 'user') === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                        {usr.role || usr.profile?.role || 'user'}
                       </span>
                     </td>
                     <td className="dashboard-table-cell text-slate-700">{usr.documents_count || 0}</td>
@@ -693,11 +834,16 @@ export default function AdminDashboard() {
                 >Next</button>
               </div>
             </div>
-          </div>
+          </div> 
+          </>
         )}
 
         {/* Support Tab */}
         {activeTab === 'support' && !loading && (
+          <>
+          <div className="mb-6 pr-2">
+            <h1 className="m-0 text-2xl font-bold text-purple-700">Help & Support</h1>
+          </div> 
           <div className="table-container bg-white rounded-3xl shadow border border-slate-200 overflow-hidden">
             <table className="dashboard-table w-full text-left text-sm">
               <thead>
@@ -822,32 +968,71 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
-          </div>
+          </div> 
+          </>
         )}
 
         {/* Dataset Tab */}
-        {activeTab === 'dataset' && (
+        {activeTab === 'dataset' && ( 
+          <>
+          <div className="mb-6 pr-2">
+            <h1 className="m-0 text-2xl font-bold text-purple-700">System Dataset</h1> 
+            <p className="text-sm text-slate-500">Import dataset rows from an Excel file (.xls or .xlsx).</p>
+          </div>  
+          
           <div className="space-y-6">
-            <div className="flex flex-col gap-4 md:flex-row justify-end items-center">
-              <div className="w-full md:w-auto md:flex-1" />
-              <div className="flex w-full max-w-xl items-center gap-3">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="w-full lg:max-w-sm">
                 <input
+                  id="dataset-search"
                   type="text"
-                  placeholder="Search biased words..."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
                     setDatasetPage(1);
                   }}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                  placeholder="Search biased or fair terms"
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm outline-none ring-0 focus:border-purple-500"
                 />
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-300 bg-white p-2 shadow-sm">
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200">
+                    <span>{importFile ? 'Change file' : 'Choose file'}</span>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xls,.xlsx"
+                      onChange={handleImportFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    onClick={handleImportDataset}
+                    disabled={importLoading}
+                    className="px-5 py-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {importLoading ? 'Importing...' : 'Import Dataset'}
+                  </button>
+                </div>
                 <button
                   onClick={() => setShowAddModal(true)}
-                  className="px-5 py-3 bg-teal-600 text-white rounded-2xl hover:bg-teal-700 font-semibold transition"
-                >Add</button>
+                  className="h-fit px-5 py-3 bg-teal-600 text-white rounded-2xl hover:bg-teal-700 font-semibold transition"
+                >
+                  Add
+                </button>
               </div>
             </div>
 
+
+             <div className="space-y-3">              {fileValidationError && (
+                <p className="text-sm text-red-600">{fileValidationError}</p>
+              )}
+              {importFile && !fileValidationError && (
+                <p className="text-sm text-slate-600">Selected file: {importFile.name}</p>
+              )}
+            </div>
             <div className="table-container bg-white rounded-3xl shadow border border-slate-200 overflow-hidden relative">
               {loading && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
@@ -860,6 +1045,7 @@ export default function AdminDashboard() {
                     <th>ID</th>
                     <th>Biased Word</th>
                     <th>Fair Alternative</th>
+                    <th className="w-24">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -868,6 +1054,15 @@ export default function AdminDashboard() {
                       <td className="dashboard-table-cell text-slate-700">{mapping.id}</td>
                       <td className="dashboard-table-cell font-semibold text-slate-900">{mapping.biased_word}</td>
                       <td className="dashboard-table-cell text-teal-700">{mapping.fair_word}</td>
+                      <td className="dashboard-table-cell">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMapping(mapping.id)}
+                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -934,11 +1129,21 @@ export default function AdminDashboard() {
                         try {
                           setLoading(true);
                           const res = await adminService.addDatasetMapping({ biased_word: newBiasedWord.trim().toLowerCase(), fair_word: newFairWord.trim() });
-                          // Prepend new mapping to list
-                          setMappings((prev) => [res.data, ...prev]);
-                          setShowAddModal(false);
-                          setNewBiasedWord('');
-                          setNewFairWord('');
+                          
+                          // Check if it's a duplicate
+                          if (res.data.is_duplicate) {
+                            setDuplicateMessage(`The biased word "${newBiasedWord}" already exists with the fair term "${res.data.fair_word}".`);
+                            setShowDuplicateModal(true);
+                            setShowAddModal(false);
+                          } else {
+                            // Prepend new mapping to list
+                            setMappings((prev) => [res.data, ...prev]);
+                            setShowAddModal(false);
+                            setNewBiasedWord('');
+                            setNewFairWord('');
+                            setSuccessMessage('Mapping added successfully!');
+                            setTimeout(() => setSuccessMessage(''), 3000);
+                          }
                         } catch (e: any) {
                           console.error('Failed to add mapping', e);
                           setError(e?.response?.data?.error || 'Failed to add mapping');
@@ -950,11 +1155,35 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               )}
+
+              {/* Duplicate Bias Word Modal */}
+              {showDuplicateModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                  <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-lg">
+                    <h3 className="text-lg font-semibold mb-4 text-amber-600">⚠️ Bias Word Already Exists</h3>
+                    <p className="text-gray-700 mb-6">{duplicateMessage}</p>
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={() => {
+                          setShowDuplicateModal(false);
+                          setDuplicateMessage('');
+                          setNewBiasedWord('');
+                          setNewFairWord('');
+                        }} 
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          </div> 
+          </>
         )}
+        </main>
       </div>
-      <Footer />
     </div>
   );
 }

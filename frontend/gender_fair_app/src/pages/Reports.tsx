@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState, type FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
@@ -26,6 +27,31 @@ type ChartData = {
   month: string;
   value: number;
 }[];
+
+const getLocalDateParts = (value: string | Date) => {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+  };
+};
+
+const getLocalYearMonth = (value: string | Date) => {
+  const { year, month } = getLocalDateParts(value);
+  return `${year}-${String(month).padStart(2, '0')}`;
+};
+
+const getLocalDateKey = (value: string | Date) => {
+  const { year, month, day } = getLocalDateParts(value);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+const getLocalWeekKey = (value: string | Date) => {
+  const { year, month, day } = getLocalDateParts(value);
+  const week = Math.ceil(day / 7);
+  return `${year}-${String(month).padStart(2, '0')}-W${week}`;
+};
 
 const LineChartSVG: FC<{ data: ChartData }> = ({ data }) => {
   const width = 640;
@@ -89,9 +115,7 @@ export default function Reports() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<AnalysisRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    new Date().toISOString().slice(0, 7) // Format: YYYY-MM
-  );
+  const [selectedMonth, setSelectedMonth] = useState<string>(getLocalYearMonth(new Date()));
   const [selectedInterval, setSelectedInterval] = useState<'day' | 'week' | 'month'>('week');
   const [downloadMonth, setDownloadMonth] = useState<string>(new Date().toISOString().slice(0, 7));
   const [downloadWeek, setDownloadWeek] = useState<string>('All');
@@ -155,25 +179,29 @@ export default function Reports() {
 
   // Filter rows by selected month
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const rowMonth = new Date(row.created_at).toISOString().slice(0, 7);
-      return rowMonth === selectedMonth;
-    });
+    return rows.filter((row) => getLocalYearMonth(row.created_at) === selectedMonth);
   }, [rows, selectedMonth]);
 
   const distinctMonths = useMemo(() => {
-    const months = new Set(rows.map((row) => new Date(row.created_at).toISOString().slice(0, 7)));
+    const months = new Set(rows.map((row) => getLocalYearMonth(row.created_at)));
     return [...months].sort();
   }, [rows]);
 
+  useEffect(() => {
+    if (distinctMonths.length === 0) return;
+    if (!distinctMonths.includes(selectedMonth)) {
+      setSelectedMonth(distinctMonths[distinctMonths.length - 1]);
+    }
+  }, [distinctMonths, selectedMonth]);
+
   const downloadMonthRows = useMemo(
-    () => rows.filter((row) => new Date(row.created_at).toISOString().slice(0, 7) === downloadMonth),
+    () => rows.filter((row) => getLocalYearMonth(row.created_at) === downloadMonth),
     [rows, downloadMonth]
   );
 
   const downloadWeekOptions = useMemo(() => {
     const weeks = new Set(
-      downloadMonthRows.map((row) => `W${Math.ceil(new Date(row.created_at).getDate() / 7)}`)
+      downloadMonthRows.map((row) => `W${Math.ceil(getLocalDateParts(row.created_at).day / 7)}`)
     );
     return ['All', ...[...weeks].sort((a, b) => a.localeCompare(b))];
   }, [downloadMonthRows]);
@@ -183,7 +211,7 @@ export default function Reports() {
       return downloadMonthRows;
     }
     return downloadMonthRows.filter((row) => {
-      const week = `W${Math.ceil(new Date(row.created_at).getDate() / 7)}`;
+      const week = `W${Math.ceil(getLocalDateParts(row.created_at).day / 7)}`;
       return week === downloadWeek;
     });
   }, [downloadMonthRows, downloadWeek]);
@@ -267,16 +295,16 @@ export default function Reports() {
       const week = Math.ceil(date.getDate() / 7);
       const { key, label } = performanceView === 'day'
         ? {
-            key: date.toISOString().slice(0, 10),
+            key: getLocalDateKey(date),
             label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           }
         : performanceView === 'week'
         ? {
-            key: `${date.getFullYear()}-W${week}`,
+            key: getLocalWeekKey(date),
             label: `W${week}`,
           }
         : {
-            key: `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`,
+            key: getLocalYearMonth(date),
             label: date.toLocaleDateString('en-US', { month: 'short' }),
           };
 
@@ -426,9 +454,6 @@ export default function Reports() {
                       </button>
                       <button type="button" className={`interval-button ${selectedInterval === 'week' ? 'active' : ''}`} onClick={() => setSelectedInterval('week')}>
                         Week
-                      </button>
-                      <button type="button" className={`interval-button ${selectedInterval === 'month' ? 'active' : ''}`} onClick={() => setSelectedInterval('month')}>
-                        Month
                       </button>
                     </div>
                   </div>

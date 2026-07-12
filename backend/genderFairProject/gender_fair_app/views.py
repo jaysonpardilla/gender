@@ -1,3 +1,4 @@
+from pathlib import Path
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
 from rest_framework.response import Response
@@ -18,7 +19,7 @@ from .serializers import (
     DocumentSerializer, TextAnalysisSerializer, BiasedWordMappingSerializer,
     UserProfileSerializer, SupportMessageSerializer
 )
-from .utils import analyze_text, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow
+from .utils import analyze_text, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow, append_mappings_to_excel_file, resolve_dataset_path
 from .docx_handler import modify_docx_with_replacements
 from django.views.decorators.http import require_http_methods
 import json
@@ -1117,11 +1118,18 @@ def admin_analytics_view(request):
         score = int((100 - len(normalized_detected) * 5) if normalized_detected else 100)
         fairness_score_by_date.setdefault(date_key, []).append(score)
 
+    for offset in range(31):
+        date_key = (timezone.now().date() - timedelta(days=offset)).isoformat()
+        documents_over_time.setdefault(date_key, 0)
+        fairness_score_by_date.setdefault(date_key, [])
+
     documents_over_time_result = []
     fairness_score_trend = []
+    cumulative_count = 0
     for date_key in sorted(documents_over_time.keys()):
-        average_score = int(sum(fairness_score_by_date[date_key]) / len(fairness_score_by_date[date_key]))
-        documents_over_time_result.append({'date': date_key, 'count': documents_over_time[date_key]})
+        cumulative_count += documents_over_time[date_key]
+        average_score = int(sum(fairness_score_by_date[date_key]) / len(fairness_score_by_date[date_key])) if fairness_score_by_date[date_key] else 100
+        documents_over_time_result.append({'date': date_key, 'count': cumulative_count})
         fairness_score_trend.append({'date': date_key, 'score': average_score})
 
     # Document type breakdown
@@ -1198,7 +1206,7 @@ def admin_analytics_view(request):
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def admin_dataset_view(request):
-    """Admin: Get dataset mappings or add a new mapping (POST)"""
+    """Admin: Get dataset mappings or add a new mapping."""
     user = request.user.username
     search_query = request.query_params.get('search', '')
     logger.info(f"🔍 DATASET REQUEST | User: {user} | Method: {request.method} | Search: '{search_query}'" if search_query else f"🔍 DATASET REQUEST | User: {user} | Method: {request.method}")
@@ -1218,32 +1226,49 @@ def admin_dataset_view(request):
             logger.warning(f"❌ ADD MAPPING FAILED | Admin: {user} | Missing fields")
             return Response({'error': 'Both biased_word and fair_word are required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            obj, created = BiasedWordMapping.objects.get_or_create(biased_word=biased_word, defaults={'fair_word': fair_word})
+            obj, created = BiasedWordMapping.objects.update_or_create(biased_word=biased_word, defaults={'fair_word': fair_word})
+            
+            status_msg = "CREATED"
             if not created:
-                obj.fair_word = fair_word
-                obj.save()
-            # Append to excel/xlsx
+                status_msg = "ALREADY_EXISTS"
+                if obj.fair_word != fair_word:
+                    obj.fair_word = fair_word
+                    obj.save()
+                    status_msg = "UPDATED"
+            
+            try:
+                from django.core.cache import cache
+                cache.delete('gender_fair_dataset')
+            except Exception:
+                pass
             from .utils import append_mapping_to_excel
             success = append_mapping_to_excel(biased_word, fair_word)
-            logger.info(f"✅ MAPPING ADDED | Admin: {user} | Biased: {biased_word} | Fair: {fair_word} | ExcelUpdate: {success}")
+            
+            logger.info(f"✅ MAPPING {status_msg} | Admin: {user} | Biased: '{biased_word}' | Fair: '{fair_word}' | ExcelUpdate: {success}")
+            print(f"[ADMIN DATASET] ✅ Mapping {status_msg}: '{biased_word}' → '{fair_word}'")
+            
             serializer = BiasedWordMappingSerializer(obj)
-            return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+            response_data = serializer.data
+            response_data['is_duplicate'] = not created
+            response_data['status'] = status_msg
+            
+            return Response(response_data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"❌ ADD MAPPING ERROR | Admin: {user} | Error: {e}")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # GET: list mappings from actual Excel file (not database)
+    # GET: list mappings from the database (Excel is only a legacy import source)
     from .utils import get_dataset_from_excel
-    excel_mappings = get_dataset_from_excel()
+    dataset_mappings = get_dataset_from_excel()
     
     # Filter if search query provided
     if search_query:
-        filtered = [m for m in excel_mappings if search_query.lower() in m['biased_word'] or search_query.lower() in m['fair_word']]
+        filtered = [m for m in dataset_mappings if search_query.lower() in m['biased_word'] or search_query.lower() in m['fair_word']]
     else:
-        filtered = excel_mappings
+        filtered = dataset_mappings
     
     count = len(filtered)
-    logger.info(f"✅ GET DATASET SUCCESS | Admin: {user} | Total: {count} mappings from Excel")
+    logger.info(f"✅ GET DATASET SUCCESS | Admin: {user} | Total: {count} mappings from database")
     
     # Convert to response format that matches BiasedWordMappingSerializer
     result = [
@@ -1255,6 +1280,112 @@ def admin_dataset_view(request):
         for idx, m in enumerate(filtered)
     ]
     return Response(result)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_dataset_mapping_view(request, mapping_id):
+    """Admin: delete a dataset mapping row."""
+    user = request.user.username
+    if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+        logger.warning(f"❌ DATASET DELETE ACCESS FAILED | User: {user} | Reason: Admin access required")
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        mapping = BiasedWordMapping.objects.get(id=mapping_id)
+    except BiasedWordMapping.DoesNotExist:
+        return Response({'error': 'Mapping not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    mapping.delete()
+    try:
+        from django.core.cache import cache
+        cache.delete('gender_fair_dataset')
+    except Exception:
+        pass
+
+    logger.info(f"✅ DATASET MAPPING DELETED | Admin: {user} | MappingId: {mapping_id}")
+    return Response({'message': 'Mapping deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def admin_dataset_import_view(request):
+    """Admin: Import dataset rows from uploaded Excel file."""
+    user = request.user.username
+    uploaded_file = request.FILES.get('file')
+    logger.info(
+        f"🗃️ DATASET IMPORT REQUEST | User: {user} | File: {uploaded_file.name if uploaded_file is not None else 'none'}"
+    )
+
+    if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+        logger.warning(f"❌ DATASET IMPORT ACCESS FAILED | User: {user} | Reason: Admin access required")
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    if not uploaded_file:
+        logger.warning(f"❌ DATASET IMPORT FAILED | Admin: {user} | Reason: File is required")
+        return Response({'error': 'File upload is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = Path(uploaded_file.name).suffix.lower()
+    if ext not in ['.xls', '.xlsx']:
+        logger.warning(f"❌ DATASET IMPORT FAILED | Admin: {user} | Reason: Unsupported file type: {ext}")
+        return Response(
+            {'error': 'Unsupported file type. Upload an .xls or .xlsx file.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Debug: Show exactly what's in the uploaded file before importing
+        from gender_fair_app.utils import _extract_mappings_from_excel_file
+        
+        logger.info(f"🔍 STEP 1: File details")
+        logger.info(f"   - Name: {uploaded_file.name}")
+        logger.info(f"   - Size: {getattr(uploaded_file, 'size', 'unknown')} bytes")
+        logger.info(f"   - Position before seek: {uploaded_file.tell() if hasattr(uploaded_file, 'tell') else 'N/A'}")
+        
+        uploaded_file.seek(0)
+        logger.info(f"   - Position after seek(0): {uploaded_file.tell()}")
+        
+        extracted_mappings = _extract_mappings_from_excel_file(uploaded_file)
+        logger.info(f"🔍 STEP 2: Extraction result - Found {len(extracted_mappings)} mappings")
+        for idx, (biased, fair) in enumerate(extracted_mappings):
+            logger.info(f"   [{idx+1}] '{biased}' → '{fair}'")
+        
+        uploaded_file.seek(0)
+        logger.info(f"🔍 STEP 3: Before append_mappings_to_excel_file - Position: {uploaded_file.tell()}")
+        
+        result = append_mappings_to_excel_file(uploaded_file, target_path=resolve_dataset_path(), merge_existing=False)
+        if result is False:
+            logger.error(f"❌ DATASET IMPORT FAILED | Admin: {user} | Error: import utility returned False")
+            return Response(
+                {'error': 'Failed to import dataset from the uploaded file.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        logger.info(
+            f"✅ DATASET IMPORT SUCCESS | Admin: {user} | Added: {result.get('added_rows')} | Updated: {result.get('updated_rows')} | Imported: {result.get('imported_rows')}"
+        )
+
+        return Response(
+            {
+                'message': 'Dataset import completed successfully.',
+                'imported_rows': result.get('imported_rows', 0),
+                'added_rows': result.get('added_rows', 0),
+                'updated_rows': result.get('updated_rows', 0),
+                'changed': result.get('changed', False),
+                'extracted_mappings': extracted_mappings[:10],  # Show first 10 in response for debugging
+            },
+            status=status.HTTP_200_OK,
+        )
+    except ValueError as exc:
+        logger.warning(f"❌ DATASET IMPORT FAILED | Admin: {user} | Error: {exc}")
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        logger.error(f"❌ DATASET IMPORT ERROR | Admin: {user} | Error: {exc}", exc_info=True)
+        return Response(
+            {'error': 'Unable to import dataset file. Please check the file format and try again.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 # Health check
