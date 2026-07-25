@@ -21,7 +21,7 @@ const AnalysisHistory: React.FC = () => {
   const navigate = useNavigate();
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterType, setFilterType] = useState<'all' | 'pdf' | 'docx' | 'txt'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'pdf' | 'docx'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'score' | 'name'>('date');
   const [currentPage, setCurrentPage] = useState(1);
   const [, setTopBiasWords] = useState<Array<{word:string;count:number}>>([]);
@@ -91,7 +91,6 @@ const AnalysisHistory: React.FC = () => {
 
   const getFileTypeLabel = (type: string): string => {
     const labels: { [key: string]: string } = {
-      txt: '📄 Text',
       docx: '📘 Word',
       pdf: '📕 PDF',
     };
@@ -199,7 +198,6 @@ const AnalysisHistory: React.FC = () => {
                     <option value="all">All Files</option>
                     <option value="pdf">PDF</option>
                     <option value="docx">Word Document</option>
-                    <option value="txt">Text File</option>
                   </select>
                 </div>
                 <div className="filter-group">

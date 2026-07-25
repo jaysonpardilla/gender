@@ -864,9 +864,16 @@ def dashboard_stats_view(request):
         total_biased_words = len(all_detected)
         last_analysis = user_docs.order_by('-created_at').first()
         last_analysis_date = last_analysis.created_at if last_analysis else None
-        docs_with_changes = user_docs.exclude(processed_text=None).exclude(detected_words=[]).count()
-        fairness_score = int((docs_with_changes / total_documents * 100) if total_documents > 0 else 0)
-        
+
+        if total_documents > 0:
+            total_score = 0
+            for doc in user_docs:
+                detected = doc.detected_words or []
+                total_score += int((100 - len(detected) * 5) if detected else 100)
+            fairness_score = int(total_score / total_documents)
+        else:
+            fairness_score = 0
+
         logger.info(f"✅ DASHBOARD STATS SUCCESS | User: {user.email} | Docs: {total_documents} | Words: {total_biased_words} | Score: {fairness_score}%")
         return Response({
             'total_documents': total_documents,
@@ -947,11 +954,16 @@ def dashboard_documents_over_time_view(request):
         for doc in user_docs:
             date_key = doc.created_at.date().isoformat()
             data_by_date[date_key] = data_by_date.get(date_key, 0) + 1
+
         result = []
         cumulative = 0
-        for date_key in sorted(data_by_date.keys()):
-            cumulative += data_by_date[date_key]
+        start_date_only = start_date.date()
+        for offset in range(days + 1):
+            current_date = start_date_only + timedelta(days=offset)
+            date_key = current_date.isoformat()
+            cumulative += data_by_date.get(date_key, 0)
             result.append({'date': date_key, 'count': cumulative})
+
         logger.info(f"✅ DASHBOARD DOCUMENTS OVER TIME SUCCESS | User: {user.email} | Data points: {len(result)}")
         return Response(result, status=status.HTTP_200_OK)
     except Exception as e:

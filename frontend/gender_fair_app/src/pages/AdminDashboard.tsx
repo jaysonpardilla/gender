@@ -101,6 +101,25 @@ const getPointCoords = (
   return { x, y };
 };
 
+const aggregateWeeklyData = (data: Array<{ date: string; count: number }>) => {
+  const sorted = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const weeklyData: Array<{ date: string; count: number; label: string }> = [];
+
+  for (let i = 0; i < sorted.length; i += 7) {
+    const weekSlice = sorted.slice(i, i + 7);
+    if (weekSlice.length === 0) continue;
+
+    const totalCount = weekSlice.reduce((sum, point) => sum + point.count, 0);
+    const startDate = new Date(weekSlice[0].date);
+    const endDate = new Date(weekSlice[weekSlice.length - 1].date);
+    const label = `${startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+
+    weeklyData.push({ date: weekSlice[weekSlice.length - 1].date, count: totalCount, label });
+  }
+
+  return weeklyData;
+};
+
 const chartColors = ['#6366f1', '#22c55e', '#fb7185', '#f59e0b', '#14b8a6', '#a855f7', '#f43f5e'];
 
 const buildPieSegments = (
@@ -358,7 +377,7 @@ export default function AdminDashboard() {
     return (parts[0]?.[0] + (parts[1]?.[0] || '')).toUpperCase().slice(0, 2);
   };
 
-  const overtimeLineData = analytics?.documents_over_time || [];
+  const overtimeLineData = aggregateWeeklyData(analytics?.documents_over_time || []);
   const overtimeMaxCount = Math.max(...overtimeLineData.map((point) => point.count), 1);
   const overtimeLabelInterval = Math.max(1, Math.ceil(overtimeLineData.length / 5));
   const overtimeAxisSteps = [0, 1, 2, 3, 4];
@@ -507,9 +526,9 @@ export default function AdminDashboard() {
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <p className="text-sm text-slate-500 uppercase tracking-[0.2em]">Analyses Over Time</p>
-                      <h2 className="text-xl font-semibold text-slate-900">Last 30 Days</h2>
+                      <h2 className="text-xl font-semibold text-slate-900">Weekly in a Month</h2>
                     </div>
-                    <span className="text-xs text-slate-500">Daily cumulative</span>
+                    <span className="text-xs text-slate-500">Weekly totals</span>
                   </div>
                 </div>
                 <div className="h-64 w-full relative py-4" ref={lineChartRef}>
@@ -533,9 +552,9 @@ export default function AdminDashboard() {
                         </g>
                       );
                     })}
-                    {analytics.documents_over_time.map((point, index) => {
-                      const label = new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-                      const coords = getPointCoords(analytics.documents_over_time, index, 700, 260, lineChartMargins);
+                    {overtimeLineData.map((point, index) => {
+                      const label = point.label || new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                      const coords = getPointCoords(overtimeLineData, index, 700, 260, lineChartMargins);
                       return (
                         <g key={point.date}>
                           <line x1={coords.x} y1={coords.y} x2={coords.x} y2={260 - lineChartMargins.bottom + 4} stroke="#c7d2fe" strokeWidth="1" opacity="0.12" />
@@ -555,7 +574,7 @@ export default function AdminDashboard() {
                           <text x={coords.x} y={coords.y - 12} textAnchor="middle" className="text-[11px] font-semibold" fill="#0f172a">
                             {point.count}
                           </text>
-                          {(index % overtimeLabelInterval === 0 || index === analytics.documents_over_time.length - 1) && (
+                          {(index % overtimeLabelInterval === 0 || index === overtimeLineData.length - 1) && (
                             <text x={coords.x} y={260 - lineChartMargins.bottom + 16} textAnchor="middle" className="text-[10px] fill-slate-500">
                               {label}
                             </text>
@@ -564,7 +583,7 @@ export default function AdminDashboard() {
                       );
                     })}
                     <path
-                      d={buildLinePath(analytics.documents_over_time, 700, 260, lineChartMargins)}
+                      d={buildLinePath(overtimeLineData, 700, 260, lineChartMargins)}
                       fill="none"
                       stroke="url(#lineGradient)"
                       strokeWidth="4"

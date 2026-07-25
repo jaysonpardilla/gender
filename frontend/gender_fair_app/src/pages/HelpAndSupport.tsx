@@ -70,7 +70,7 @@ const faqItems: FAQItem[] = [
     id: 2,
     question: 'What file formats are supported?',
     answer:
-      'The system currently supports PDF (.pdf), Microsoft Word (.docx), and plain text (.txt) files. Uploaded documents are processed and analyzed in the same way as manually entered text.',
+      'The system currently supports PDF (.pdf) and Microsoft Word (.docx) files. Uploaded documents are processed and analyzed in the same way as manually entered text.',
     category: 'Technical',
   },
   {
@@ -84,7 +84,7 @@ const faqItems: FAQItem[] = [
     id: 4,
     question: 'How does the system detect biased words?',
     answer:
-      'The system uses a rule-based approach. It compares the words found in your text or document against the gender-biased terms stored in the "gender_fair_dataset_300.xls" dataset and replaces them with their corresponding gender-fair alternatives.',
+      'The system uses a rule-based approach. It compares the words found in your text or document against the gender-biased terms stored in the database and replaces them with their corresponding gender-fair alternatives.',
     category: 'Technical',
   },
   {

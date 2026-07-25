@@ -36,12 +36,210 @@ interface RenderedPage {
   settings: PageSettings;
 }
 
+type DocxTypographyStyle = {
+  fontFamily: string;
+  lineHeight: number;
+  paragraphSpacingBefore: number;
+  paragraphSpacingAfter: number;
+};
+
+const FALLBACK_FONT_FAMILY = '"Calibri", "Segoe UI", Arial, sans-serif';
+
+function getLocalName(tagName: string): string {
+  return tagName.includes(':') ? tagName.split(':').pop() || tagName : tagName;
+}
+
+function parseDocxTypographyStyles(mainDocument: string): DocxTypographyStyle {
+  if (!mainDocument) {
+    return {
+      fontFamily: FALLBACK_FONT_FAMILY,
+      lineHeight: 1.45,
+      paragraphSpacingBefore: 6,
+      paragraphSpacingAfter: 6,
+    };
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(mainDocument, 'application/xml');
+    const fontElements = Array.from(doc.getElementsByTagName('*')).filter(
+      (el) => getLocalName(el.tagName) === 'rFonts'
+    );
+
+    const fontFamily = fontElements
+      .map((el) =>
+        el.getAttribute('w:ascii') ||
+        el.getAttribute('ascii') ||
+        el.getAttribute('w:hAnsi') ||
+        el.getAttribute('hAnsi') ||
+        el.getAttribute('w:eastAsia') ||
+        el.getAttribute('eastAsia')
+      )
+      .find((value): value is string => Boolean(value));
+
+    const spacingElement = Array.from(doc.getElementsByTagName('*')).find(
+      (el) => getLocalName(el.tagName) === 'spacing'
+    );
+
+    const lineValue = spacingElement
+      ? parseInt(spacingElement.getAttribute('w:line') || spacingElement.getAttribute('line') || '', 10)
+      : NaN;
+    const lineRule = spacingElement?.getAttribute('w:lineRule') || spacingElement?.getAttribute('lineRule') || 'auto';
+    const lineHeight = Number.isFinite(lineValue) && lineValue > 0
+      ? (lineRule === 'exact' ? Math.max(1.1, lineValue / 240) : Math.max(1.2, lineValue / 240))
+      : 1.45;
+
+    const before = spacingElement
+      ? parseInt(spacingElement.getAttribute('w:before') || spacingElement.getAttribute('before') || '', 10)
+      : NaN;
+    const after = spacingElement
+      ? parseInt(spacingElement.getAttribute('w:after') || spacingElement.getAttribute('after') || '', 10)
+      : NaN;
+
+    return {
+      fontFamily: fontFamily || FALLBACK_FONT_FAMILY,
+      lineHeight,
+      paragraphSpacingBefore: Number.isFinite(before) ? Math.max(0, Math.round((before * 96) / 1440)) : 6,
+      paragraphSpacingAfter: Number.isFinite(after) ? Math.max(0, Math.round((after * 96) / 1440)) : 6,
+    };
+  } catch {
+    return {
+      fontFamily: FALLBACK_FONT_FAMILY,
+      lineHeight: 1.45,
+      paragraphSpacingBefore: 6,
+      paragraphSpacingAfter: 6,
+    };
+  }
+}
+
 // Props for the page display component
 interface DocxPageDisplayProps {
   currentPage: RenderedPage | null;
   wordReplacements: WordReplacement[];
   highlightWordsPerOccurrence: (container: HTMLElement, wordReplacements: WordReplacement[]) => void;
 }
+
+const normalizeColor = (value: string | null): string => value?.replace(/\s+/g, '').toLowerCase() ?? '';
+
+const isBlackColor = (value: string): boolean => {
+  return [
+    'black',
+    '#000',
+    '#000000',
+    'rgb(0,0,0)',
+    'rgba(0,0,0,1)',
+    'rgba(0,0,0,0.99)',
+    'rgba(0,0,0,0.98)',
+  ].includes(value);
+};
+
+const removeBlackSvgArtifacts = (root: HTMLElement) => {
+  const selectors = [
+    'rect',
+    'path',
+    'ellipse',
+    'circle',
+    'polygon',
+    'polyline',
+    'line',
+    'foreignObject',
+    'svg[style*="background:black"]',
+  ];
+
+  root.querySelectorAll(selectors.join(',')).forEach((node) => {
+    if (!(node instanceof HTMLElement || node instanceof SVGElement)) {
+      return;
+    }
+
+    const style = window.getComputedStyle(node as Element);
+    const fill = normalizeColor((style as unknown as { fill?: string }).fill || node.getAttribute('fill'));
+    const stroke = normalizeColor((style as unknown as { stroke?: string }).stroke || node.getAttribute('stroke'));
+    const strokeWidth = parseFloat((style as unknown as { strokeWidth?: string }).strokeWidth || node.getAttribute('stroke-width') || '0');
+    const hasNoFill = !fill || fill === 'none';
+    const hasNoStroke = !stroke || stroke === 'none' || strokeWidth === 0;
+
+    if (hasNoFill && hasNoStroke) {
+      node.remove();
+      return;
+    }
+
+    const rect = (node as HTMLElement).getBoundingClientRect ? (node as HTMLElement).getBoundingClientRect() : null;
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      node.remove();
+      return;
+    }
+
+    const isTopLeft = rect.left - root.getBoundingClientRect().left < 120 && rect.top - root.getBoundingClientRect().top < 120;
+    if (isTopLeft || rect.width / root.getBoundingClientRect().width > 0.05 || rect.height / root.getBoundingClientRect().height > 0.05) {
+      node.remove();
+    }
+  });
+};
+
+const removeDocxFooterArtifacts = (root: HTMLElement) => {
+  const foreignObjects = Array.from(root.querySelectorAll<HTMLElement>('foreignObject'));
+  foreignObjects.forEach((fo) => {
+    const hasBlackRect = !!fo.querySelector('rect[fill="black"], rect[fill="#000"], rect[fill="#000000"], rect[style*="fill:black"], rect[style*="fill:#000"], rect[style*="fill:#000000"]');
+    const hasFooter = !!fo.querySelector('.docx_footer, p.docx_footer');
+    if (hasBlackRect || hasFooter) {
+      fo.remove();
+      return;
+    }
+    const rect = fo.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const isTopLeft = rect.left - rootRect.left < 120 && rect.top - rootRect.top < 120;
+    const isLarge = rect.width >= 30 && rect.height >= 30;
+    if (isTopLeft && isLarge) {
+      fo.remove();
+    }
+  });
+};
+
+const removeDocxHeaderArtifacts = (root: HTMLElement) => {
+  const headerArtifacts = Array.from(root.querySelectorAll<HTMLElement>('header, p.docx_header, .docx_header'));
+  headerArtifacts.forEach((node) => {
+    node.remove();
+  });
+};
+
+const removeBlackArtifacts = (root: HTMLElement) => {
+  const rootRect = root.getBoundingClientRect();
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>('*'));
+
+  candidates.forEach((node) => {
+    const styleAttr = normalizeColor(node.getAttribute('style'));
+    const fillAttr = normalizeColor(node.getAttribute('fill'));
+    const strokeAttr = normalizeColor(node.getAttribute('stroke'));
+    const bgColor = normalizeColor(window.getComputedStyle(node).backgroundColor);
+    const inlineBg = /background(-color)?:.*(black|#000|#000000|rgb\(0,0,0\)|rgba\(0,0,0,1\))/i.test(styleAttr);
+    const inlineFill = /fill:.*(black|#000|#000000|rgb\(0,0,0\)|rgba\(0,0,0,1\))/i.test(styleAttr);
+    const inlineStroke = /stroke:.*(black|#000|#000000|rgb\(0,0,0\)|rgba\(0,0,0,1\))/i.test(styleAttr);
+    const hasBlackFill = isBlackColor(fillAttr) || inlineFill;
+    const hasBlackStroke = isBlackColor(strokeAttr) || inlineStroke;
+    const hasBlackBackground = isBlackColor(bgColor) || inlineBg;
+
+    if (!hasBlackFill && !hasBlackStroke && !hasBlackBackground) return;
+
+    const rect = node.getBoundingClientRect();
+    const area = rect.width * rect.height;
+    const rootArea = Math.max(1, rootRect.width * rootRect.height);
+    const areaRatio = area / rootArea;
+    const isLargeBlock = rect.width >= 30 && rect.height >= 30;
+    const isTopLeft = rect.left - rootRect.left < 80 && rect.top - rootRect.top < 80;
+    const nodeName = node.tagName.toLowerCase();
+    const isSvgShape = ['rect', 'path', 'ellipse', 'circle', 'polygon', 'polyline', 'line', 'g', 'svg'].includes(nodeName);
+
+    if (isLargeBlock && (isTopLeft || areaRatio > 0.01 || isSvgShape)) {
+      node.remove();
+      return;
+    }
+
+    const blackSolid = (hasBlackBackground || hasBlackFill || hasBlackStroke) && areaRatio > 0.005;
+    if (blackSolid) {
+      node.remove();
+    }
+  });
+};
 
 // Memoized page display component - only updates when currentPage or highlighting changes
 const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplacements, highlightWordsPerOccurrence }) => {
@@ -54,7 +252,12 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
       cloned.style.transformOrigin = 'top center';
       cloned.style.width = '100%';
       cloned.style.maxWidth = '100%';
+
       pageContainerRef.current.appendChild(cloned);
+      removeBlackArtifacts(cloned);
+      removeBlackSvgArtifacts(cloned);
+      removeDocxFooterArtifacts(cloned);
+      removeDocxHeaderArtifacts(cloned);
 
       // Apply highlighting to the cloned page
       const docxSection = cloned.querySelector('section.docx') as HTMLElement | null;
@@ -121,6 +324,60 @@ const areDocxPropsEqual = (prevProps: DocxRendererProps, nextProps: DocxRenderer
       item.instanceId === nextItem.instanceId
     );
   });
+};
+
+const createDocxPageElement = (
+  pageSettings: PageSettings,
+  typography: DocxTypographyStyle,
+  sectionElement: HTMLElement,
+): HTMLElement => {
+  const pageElement = document.createElement('div');
+  pageElement.className = 'docx-page';
+  pageElement.style.width = `min(100%, ${pageSettings.width}px)`;
+  pageElement.style.maxWidth = '100%';
+  pageElement.style.minHeight = `${pageSettings.height}px`;
+  pageElement.style.height = 'auto';
+  pageElement.style.padding = '0';
+  pageElement.style.boxSizing = 'border-box';
+  pageElement.style.backgroundColor = '#ffffff';
+  pageElement.style.border = '1px solid #e5e7eb';
+  pageElement.style.borderRadius = '10px';
+  pageElement.style.boxShadow = '0 16px 40px rgba(15, 23, 42, 0.12)';
+  pageElement.style.margin = '0 auto 28px';
+  pageElement.style.overflow = 'hidden';
+  pageElement.style.position = 'relative';
+  pageElement.style.display = 'flex';
+  pageElement.style.flexDirection = 'column';
+
+  const pageBody = document.createElement('div');
+  pageBody.style.width = '100%';
+  pageBody.style.height = 'auto';
+  pageBody.style.minHeight = `${pageSettings.height}px`;
+  pageBody.style.padding = `${pageSettings.marginTop}px ${pageSettings.marginRight}px ${pageSettings.marginBottom}px ${pageSettings.marginLeft}px`;
+  pageBody.style.boxSizing = 'border-box';
+  pageBody.style.backgroundColor = '#ffffff';
+  pageBody.style.overflow = 'visible';
+
+  const sectionClone = sectionElement.cloneNode(false) as HTMLElement;
+  sectionClone.style.width = '100%';
+  sectionClone.style.maxWidth = '100%';
+  sectionClone.style.minHeight = 'auto';
+  sectionClone.style.position = 'relative';
+  sectionClone.style.margin = '0';
+  sectionClone.style.padding = '0';
+  sectionClone.style.boxSizing = 'border-box';
+  sectionClone.style.backgroundColor = '#ffffff';
+  sectionClone.style.boxShadow = 'none';
+  sectionClone.style.color = '#111827';
+  sectionClone.style.fontFamily = typography.fontFamily;
+  sectionClone.style.lineHeight = `${typography.lineHeight}`;
+  sectionClone.style.fontSize = '11pt';
+  sectionClone.style.display = 'block';
+
+  pageBody.appendChild(sectionClone);
+  pageElement.appendChild(pageBody);
+
+  return pageElement;
 };
 
 const DocxRendererContent: React.FC<DocxRendererProps> = ({
@@ -342,6 +599,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
 
         console.log('📄 Rendering DOCX with docx-preview...');
         const pageSettings = structure.pageSettings;
+        const typography = parseDocxTypographyStyles(structure.mainDocument);
 
         // Create offscreen container attached to the DOM so layout can be measured correctly
         if (offscreenContainerRef.current) {
@@ -372,6 +630,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
             ignoreLastRenderedPageBreak: false,
             breakPages: true,
             inWrapper: false,
+            useBase64URL: true,
           });
         } finally {
           // Ensure we still compute layout even if renderAsync throws.
@@ -383,41 +642,77 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
         let renderedPages: RenderedPage[] = [];
 
         if (pageNodes.length > 0) {
-          renderedPages = pageNodes.map((pageNode, index) => {
-            const pageElement = document.createElement('div');
-            pageElement.className = 'docx-page';
-            pageElement.style.width = `${pageSettings.width}px`;
-            pageElement.style.maxWidth = '100%';
-            pageElement.style.minHeight = `${pageSettings.height}px`;
-            pageElement.style.padding = '0';
-            pageElement.style.boxSizing = 'border-box';
-            pageElement.style.backgroundColor = 'white';
-            pageElement.style.boxShadow = '0 1px 6px rgba(0, 0, 0, 0.08)';
-            pageElement.style.margin = '0 auto 20px';
-            pageElement.style.overflow = 'hidden';
-            pageElement.style.position = 'relative';
-            pageElement.style.display = 'flex';
-            pageElement.style.flexDirection = 'column';
+          const availableContentHeight = Math.max(
+            1,
+            pageSettings.height - pageSettings.marginTop - pageSettings.marginBottom - 24,
+          );
 
-            const clonedPage = pageNode.cloneNode(true) as HTMLElement;
-            clonedPage.style.width = '100%';
-            clonedPage.style.maxWidth = '100%';
-            clonedPage.style.minHeight = `${pageSettings.height}px`;
-            clonedPage.style.position = 'static';
-            clonedPage.style.margin = '0';
-            clonedPage.style.padding = '0';
-            clonedPage.style.boxSizing = 'border-box';
-            clonedPage.style.backgroundColor = 'white';
-            clonedPage.style.boxShadow = 'none';
-            pageElement.appendChild(clonedPage);
+          const splitPages: RenderedPage[] = [];
 
-            return {
-              pageNum: index + 1,
-              element: pageElement,
-              settings: pageSettings,
-            };
+          pageNodes.forEach((pageNode) => {
+            const pageElement = createDocxPageElement(pageSettings, typography, pageNode);
+            const pageSection = pageElement.querySelector('section') as HTMLElement | null;
+            if (!pageSection) {
+              splitPages.push({ pageNum: splitPages.length + 1, element: pageElement, settings: pageSettings });
+              return;
+            }
+
+            const sourceChildren = Array.from(pageNode.children);
+            if (sourceChildren.length === 0) {
+              splitPages.push({ pageNum: splitPages.length + 1, element: pageElement, settings: pageSettings });
+              return;
+            }
+
+            let currentPageElement = pageElement;
+            let currentSection = currentPageElement.querySelector('section') as HTMLElement | null;
+
+            if (!currentSection) {
+              splitPages.push({ pageNum: splitPages.length + 1, element: currentPageElement, settings: pageSettings });
+              return;
+            }
+
+            const pageChildren: HTMLElement[] = [];
+            sourceChildren.forEach((child) => {
+              const childClone = child.cloneNode(true) as HTMLElement;
+              if (!currentSection) {
+                return;
+              }
+
+              currentSection.appendChild(childClone);
+              pageChildren.push(childClone);
+
+              const currentHeight = currentSection.scrollHeight;
+              if (currentHeight > availableContentHeight && pageChildren.length > 1) {
+                currentSection.removeChild(childClone);
+                pageChildren.pop();
+
+                splitPages.push({
+                  pageNum: splitPages.length + 1,
+                  element: currentPageElement,
+                  settings: pageSettings,
+                });
+
+                currentPageElement = createDocxPageElement(pageSettings, typography, pageNode);
+                currentSection = currentPageElement.querySelector('section') as HTMLElement | null;
+                if (!currentSection) {
+                  return;
+                }
+                currentSection.appendChild(childClone);
+                pageChildren.length = 0;
+                pageChildren.push(childClone);
+              }
+            });
+
+            if (currentSection && currentSection.children.length > 0) {
+              splitPages.push({
+                pageNum: splitPages.length + 1,
+                element: currentPageElement,
+                settings: pageSettings,
+              });
+            }
           });
 
+          renderedPages = splitPages;
           structure.debugInfo.pagesGenerated = renderedPages.length;
           console.log(`📊 Detected ${renderedPages.length} pages from docx-preview`);
         } else {
@@ -528,7 +823,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   return (
     <div className="h-full flex flex-col docx-viewer">
       {/* Main Content Area - Only the page display will re-render on highlighting changes */}
-      <div className="flex-1 overflow-auto p-4 bg-white">
+      <div className="flex-1 overflow-auto p-0">
         {currentPage && (
           <DocxPageDisplay
             currentPage={currentPage}

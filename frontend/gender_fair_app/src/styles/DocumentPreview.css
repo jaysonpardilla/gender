@@ -71,16 +71,17 @@
 .docx-viewer-wrapper {
   flex: 1;
   overflow: auto;
-  padding: 16px;
-  background: var(--bg-secondary);
+  padding: 0;
+  margin: 0;
+  background: transparent;
   transition: background-color 0.3s ease;
 }
 
 .docx-viewer {
   background: transparent;
   padding: 0;
+  margin: 0;
   max-width: 100%;
-  margin: 0 auto;
   box-shadow: none;
   font-size: 14px;
   line-height: 1.6;
@@ -88,14 +89,17 @@
 }
 
 .docx-viewer .docx-page {
-  margin: 0 auto 18px;
-  border: none;
-  border-radius: 6px;
-  overflow: hidden;
-  width: fit-content;
+  margin: 0 auto 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: visible;
+  width: min(100%, 100%);
   max-width: 100%;
-  background: transparent;
-  box-shadow: none;
+  min-height: 1123px;
+  height: auto;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+  position: relative;
 }
 
 .docx-viewer .docx-page:last-child {
@@ -104,11 +108,36 @@
 
 .docx-viewer .docx-page > section.docx,
 .docx-viewer .docx-page > .docx-wrapper {
-  background: transparent !important;
+  background: #ffffff !important;
   box-shadow: none !important;
   width: 100% !important;
   margin: 0 !important;
   padding: 0 !important;
+  display: block !important;
+}
+
+.docx-viewer .docx-page section.docx img,
+.docx-viewer .docx-page .docx-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.docx-viewer .docx-page section.docx,
+.docx-viewer .docx-page .docx-wrapper {
+  overflow: visible;
+  position: relative;
+}
+
+.docx-viewer .docx-page section.docx p,
+.docx-viewer .docx-page section.docx li {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.docx-viewer .docx-page section.docx p + p {
+  margin-top: 0.25em;
 }
 
 .docx-viewer .docx-page > section.docx * {
@@ -121,23 +150,40 @@
   font-size: 14px !important;
 }
 
-/* Suppress black rectangle artifacts in DOCX rendering */
-.docx-viewer svg {
-  display: none !important;
-}
-
+/* Hide only obvious black artifact elements without suppressing real SVG-based images */
 .docx-viewer rect[style*="black"],
 .docx-viewer rect[style*="#000"],
 .docx-viewer rect[fill="black"],
-.docx-viewer rect[fill="#000000"] {
+.docx-viewer rect[fill="#000000"],
+.docx-viewer path[fill="black"],
+.docx-viewer path[fill="#000"],
+.docx-viewer path[fill="#000000"],
+.docx-viewer ellipse[fill="black"],
+.docx-viewer ellipse[fill="#000"],
+.docx-viewer ellipse[fill="#000000"] {
   display: none !important;
 }
 
-/* Hide any absolutely positioned black elements that might be artifacts */
-.docx-viewer div[style*="background: rgb(0, 0, 0)"],
-.docx-viewer div[style*="background:#000"],
-.docx-viewer div[style*="background-color: rgb(0, 0, 0)"],
-.docx-viewer div[style*="background-color:#000"] {
+.docx-viewer *[style*="background: rgb(0, 0, 0)"],
+.docx-viewer *[style*="background:rgb(0,0,0)"],
+.docx-viewer *[style*="background:#000"],
+.docx-viewer *[style*="background: #000"],
+.docx-viewer *[style*="background:#000000"],
+.docx-viewer *[style*="background-color: rgb(0, 0, 0)"],
+.docx-viewer *[style*="background-color:rgb(0,0,0)"],
+.docx-viewer *[style*="background-color:#000"],
+.docx-viewer *[style*="background-color: #000"],
+.docx-viewer *[style*="background-color:#000000"] {
+  display: none !important;
+}
+
+.docx-viewer svg [fill="black"],
+.docx-viewer svg [fill="#000"],
+.docx-viewer svg [fill="#000000"],
+.docx-viewer svg [style*="fill:#000"],
+.docx-viewer svg [style*="fill: #000"],
+.docx-viewer svg [style*="fill:rgb(0,0,0)"],
+.docx-viewer svg [style*="fill: rgb(0, 0, 0)"] {
   display: none !important;
 }
 

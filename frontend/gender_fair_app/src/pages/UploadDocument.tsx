@@ -571,7 +571,7 @@ const UploadDocument: React.FC = () => {
                 </div>
 
                 <div className="supported-formats">
-                  <p>Supported formats: <strong>.docx, .pdf, .txt</strong> (Max size: 50MB)</p>
+                  <p>Supported formats: <strong>.docx, .pdf</strong> (Max size: 50MB)</p>
                 </div>
               </section>
 

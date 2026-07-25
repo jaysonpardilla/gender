@@ -98,6 +98,45 @@ const UserDashboard: React.FC = () => {
     fetchDashboardData();
   }, []);
 
+  const aggregateDocumentsForFilter = (data: DocumentOverTime[], filter: 'week' | 'month' | 'year'): DocumentOverTime[] => {
+    if (!data || data.length === 0) {
+      return [];
+    }
+
+    const sorted = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (filter === 'week') {
+      return sorted;
+    }
+
+    const bucketMap = new Map<string, DocumentOverTime>();
+
+    const getWeekKey = (dateStr: string) => {
+      const date = new Date(dateStr);
+      const day = date.getDay();
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - ((day + 6) % 7));
+      return `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
+    };
+
+    const getMonthKey = (dateStr: string) => {
+      const date = new Date(dateStr);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const bucketKey = filter === 'month' ? getWeekKey : getMonthKey;
+
+    sorted.forEach((entry) => {
+      const key = bucketKey(entry.date);
+      const existing = bucketMap.get(key);
+      if (!existing || new Date(entry.date).getTime() >= new Date(existing.date).getTime()) {
+        bucketMap.set(key, { date: entry.date, count: entry.count });
+      }
+    });
+
+    return Array.from(bucketMap.values()).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  };
+
   // compute filtered documents when original data or filter changes
   useEffect(() => {
     if (!documentsOverTime || documentsOverTime.length === 0) {
@@ -122,12 +161,14 @@ const UserDashboard: React.FC = () => {
       return dt >= cutoff;
     });
 
-    // If filtering produces empty result, fallback to last N points to always show something
-    if (filtered.length === 0) {
-      const lastN = documentsOverTime.slice(-7);
-      setFilteredDocuments(lastN);
+    const aggregated = aggregateDocumentsForFilter(filtered, timeFilter);
+
+    // If filtering produces empty result, fallback to the most recent points.
+    if (aggregated.length === 0) {
+      const fallback = aggregateDocumentsForFilter(documentsOverTime.slice(-7), timeFilter);
+      setFilteredDocuments(fallback);
     } else {
-      setFilteredDocuments(filtered);
+      setFilteredDocuments(aggregated);
     }
   }, [documentsOverTime, timeFilter]);
 
@@ -218,7 +259,8 @@ const UserDashboard: React.FC = () => {
   };
 
   const getComparisonPercentage = (score: number): number => {
-    return Math.round(score * 1.5);
+    // Use the score directly and cap to 100% so the comparison text remains valid.
+    return Math.min(100, Math.max(0, Math.round(score)));
   };
 
   const formatDate = (dateString: string) => {
@@ -423,8 +465,15 @@ const UserDashboard: React.FC = () => {
                       return path;
                     };
 
-                    const linePath = catmullRom2bezier(points);
-                    const areaPath = linePath + ` L ${points[points.length - 1].x},${300 - paddingBottom} L ${points[0].x},${300 - paddingBottom} Z`;
+                    let linePath = '';
+                    let areaPath = '';
+                    if (points.length === 1) {
+                      linePath = `M ${points[0].x},${points[0].y}`;
+                      areaPath = `M ${points[0].x},${points[0].y} L ${points[0].x},${300 - paddingBottom} L ${points[0].x},${300 - paddingBottom} Z`;
+                    } else {
+                      linePath = catmullRom2bezier(points);
+                      areaPath = linePath + ` L ${points[points.length - 1].x},${300 - paddingBottom} L ${points[0].x},${300 - paddingBottom} Z`;
+                    }
 
                     // y axis labels (nice ticks)
                     const ticks = 5; // a bit more vertical resolution
