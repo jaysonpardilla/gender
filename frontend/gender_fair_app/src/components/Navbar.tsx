@@ -20,9 +20,9 @@ export default function Navbar() {
 
         <nav className="flex justify-center items-center gap-8 text-xs font-medium uppercase tracking-[0.08em] text-slate-300">
           <a href="#features" className="transition hover:text-white">Features</a>
-          <Link to="/reports" className="transition hover:text-white">Reports</Link>
-          <a href="#word-guide" className="transition hover:text-white">Word Guide</a>
-          <a href="#pricing" className="transition hover:text-white">Pricing</a>
+          <a href="#playground" className="transition hover:text-white">Playground</a>
+          <a href="#reports" className="transition hover:text-white">Reports</a>
+          <a href="#word-guide" className="transition hover:text-white">How it Works</a>
           <a href="#about" className="transition hover:text-white">About</a>
         </nav>
 

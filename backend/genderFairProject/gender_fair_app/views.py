@@ -1130,19 +1130,21 @@ def admin_analytics_view(request):
         score = int((100 - len(normalized_detected) * 5) if normalized_detected else 100)
         fairness_score_by_date.setdefault(date_key, []).append(score)
 
-    for offset in range(31):
-        date_key = (timezone.now().date() - timedelta(days=offset)).isoformat()
-        documents_over_time.setdefault(date_key, 0)
-        fairness_score_by_date.setdefault(date_key, [])
-
     documents_over_time_result = []
     fairness_score_trend = []
     cumulative_count = 0
-    for date_key in sorted(documents_over_time.keys()):
-        cumulative_count += documents_over_time[date_key]
-        average_score = int(sum(fairness_score_by_date[date_key]) / len(fairness_score_by_date[date_key])) if fairness_score_by_date[date_key] else 100
-        documents_over_time_result.append({'date': date_key, 'count': cumulative_count})
-        fairness_score_trend.append({'date': date_key, 'score': average_score})
+    start_date = timezone.now().date() - timedelta(days=30)
+    for offset in range(31):
+        date_key = (start_date + timedelta(days=offset)).isoformat()
+        if date_key not in documents_over_time and date_key not in fairness_score_by_date:
+            continue
+
+        cumulative_count += documents_over_time.get(date_key, 0)
+        scores = fairness_score_by_date.get(date_key, [])
+        average_score = int(sum(scores) / len(scores)) if scores else None
+        if average_score is not None:
+            documents_over_time_result.append({'date': date_key, 'count': cumulative_count})
+            fairness_score_trend.append({'date': date_key, 'score': average_score})
 
     # Document type breakdown
     type_counts = {}

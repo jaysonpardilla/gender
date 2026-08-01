@@ -637,28 +637,33 @@ export default function AdminDashboard() {
                         </g>
                       );
                     })}
-                    {analytics.fairness_score_trend.slice(-5).map((point, index, all) => {
+                    {(() => {
+                      const trendPoints = analytics.fairness_score_trend.slice(-8);
                       const barInnerWidth = 620 - barChartMargins.left - barChartMargins.right;
-                      const barWidth = barInnerWidth / all.length;
-                      const x = barChartMargins.left + index * barWidth;
+                      const barWidth = trendPoints.length > 0 ? barInnerWidth / trendPoints.length : barInnerWidth;
                       const barInnerHeight = 280 - barChartMargins.top - barChartMargins.bottom;
-                      const height = Math.max(12, (point.score / 100) * barInnerHeight);
-                      const y = barChartMargins.top + barInnerHeight - height;
-                      const label = new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                      const maxScore = Math.max(...trendPoints.map((point) => point.score), 100);
 
-                      return (
-                        <g key={point.date}>
-                          <rect x={x + 8} y={y} width={barWidth - 16} height={height} rx="14" fill="url(#barGradient)" />
-                          <rect x={x + 8} y={y} width={barWidth - 16} height={Math.max(12, height * 0.25)} rx="14" fill="url(#barGlow)" />
-                          <text x={x + barWidth / 2} y={y - 8} textAnchor="middle" className="text-[11px] font-semibold" fill="#111827">
-                            {point.score}%
-                          </text>
-                          <text x={x + barWidth / 2} y={280 - barChartMargins.bottom + 10} textAnchor="middle" className="text-[10px] text-slate-500">
-                            {label}
-                          </text>
-                        </g>
-                      );
-                    })}
+                      return trendPoints.map((point, index) => {
+                        const x = barChartMargins.left + index * barWidth;
+                        const height = Math.max(12, (point.score / maxScore) * barInnerHeight);
+                        const y = barChartMargins.top + barInnerHeight - height;
+                        const label = new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+                        return (
+                          <g key={point.date}>
+                            <rect x={x + 8} y={y} width={Math.max(16, barWidth - 16)} height={height} rx="14" fill="url(#barGradient)" />
+                            <rect x={x + 8} y={y} width={Math.max(16, barWidth - 16)} height={Math.max(6, height * 0.25)} rx="14" fill="url(#barGlow)" />
+                            <text x={x + barWidth / 2} y={y - 8} textAnchor="middle" className="text-[11px] font-semibold" fill="#111827">
+                              {point.score}%
+                            </text>
+                            <text x={x + barWidth / 2} y={280 - barChartMargins.bottom + 10} textAnchor="middle" className="text-[10px] text-slate-500">
+                              {label}
+                            </text>
+                          </g>
+                        );
+                      });
+                    })()}
                     <text x="40" y="20" className="text-xs font-semibold text-slate-500">
                       Fairness
                     </text>

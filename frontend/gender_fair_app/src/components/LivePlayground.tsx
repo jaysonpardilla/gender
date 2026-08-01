@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 
 export default function LivePlayground(){
   return (
-    <section className="scroll-mt-24 mx-auto max-w-7xl px-16 pb-12">
+    <section id="playground" className="scroll-mt-24 mx-auto max-w-7xl px-16 pb-12">
       <div className="rounded-[1rem] border border-white/10 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
       <motion.div
         initial={{ y: 20, opacity: 0 }}

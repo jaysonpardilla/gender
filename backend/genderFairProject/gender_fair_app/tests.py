@@ -5,10 +5,11 @@ import xlrd
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APIClient
 
-from gender_fair_app.models import BiasedWordMapping
+from gender_fair_app.models import BiasedWordMapping, Document
 from gender_fair_app.utils import append_mappings_to_excel_file
 
 
@@ -157,3 +158,39 @@ class ExcelImportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(any(item['biased_word'] == 'chairman' and item['fair_word'] == 'chairperson' for item in payload))
+
+    def test_admin_analytics_uses_real_document_scores_for_fairness_trend(self):
+        admin = User.objects.create_user(username='admin-analytics@example.com', email='admin-analytics@example.com', password='password123')
+        admin.profile.role = 'admin'
+        admin.profile.save()
+
+        today = timezone.now().date()
+        yesterday = today - timezone.timedelta(days=1)
+
+        today_document = Document.objects.create(
+            user=admin,
+            original_text='Sample text',
+            processed_text='Processed text',
+            detected_words=['biasword1', 'biasword2', 'biasword3'],
+        )
+        today_document.created_at = timezone.datetime.combine(today, timezone.datetime.min.time(), tzinfo=timezone.get_current_timezone())
+        today_document.save(update_fields=['created_at'])
+
+        yesterday_document = Document.objects.create(
+            user=admin,
+            original_text='Another sample',
+            processed_text='Processed sample',
+            detected_words=['biasword1'],
+        )
+        yesterday_document.created_at = timezone.datetime.combine(yesterday, timezone.datetime.min.time(), tzinfo=timezone.get_current_timezone())
+        yesterday_document.save(update_fields=['created_at'])
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=admin)
+        response = self.client.get('/api/admin/analytics/')
+
+        self.assertEqual(response.status_code, 200)
+        trend = response.json()['fairness_score_trend']
+        self.assertTrue(any(item['date'] == yesterday.isoformat() for item in trend))
+        self.assertTrue(any(item['date'] == today.isoformat() for item in trend))
+        self.assertTrue(any(isinstance(item['score'], int) and 0 <= item['score'] <= 100 for item in trend))
