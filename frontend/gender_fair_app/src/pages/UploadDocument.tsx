@@ -410,6 +410,11 @@ const UploadDocument: React.FC = () => {
     });
   };
 
+  const approveAllReplacements = () => {
+    setWordReplacements(prev => prev.map(item => ({ ...item, approved: true })));
+    setHasSavedAnalysis(false);
+  };
+
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -657,7 +662,17 @@ const UploadDocument: React.FC = () => {
                 </div>
 
                 <div className="word-replacements">
-                  <h4>Word Replacements</h4>
+                  <div className="word-replacements-header">
+                    <h4>Word Replacements</h4>
+                    <button
+                      className="replace-all-btn"
+                      onClick={approveAllReplacements}
+                      disabled={wordReplacements.length === 0 || wordReplacements.every(replacement => replacement.approved)}
+                      title="Approve all detected replacements"
+                    >
+                      Replace All
+                    </button>
+                  </div>
                   <div className="replacements-list">
                     {wordReplacements.length === 0 ? (
                       <p className="no-words">No biased words detected! ✓</p>

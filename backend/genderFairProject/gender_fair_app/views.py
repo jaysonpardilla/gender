@@ -939,38 +939,6 @@ def dashboard_top_bias_words_view(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def dashboard_documents_over_time_view(request):
-    """Get document count over time for dashboard chart"""
-    user = request.user
-    days = int(request.query_params.get('days', 42))
-    logger.info(f"📈 DASHBOARD DOCUMENTS OVER TIME REQUEST | User: {user.email} | Days: {days}")
-    
-    try:
-        start_date = timezone.now() - timedelta(days=days)
-        user_docs = Document.objects.filter(user=user, created_at__gte=start_date).order_by('created_at')
-        data_by_date = {}
-        for doc in user_docs:
-            date_key = doc.created_at.date().isoformat()
-            data_by_date[date_key] = data_by_date.get(date_key, 0) + 1
-
-        result = []
-        cumulative = 0
-        start_date_only = start_date.date()
-        for offset in range(days + 1):
-            current_date = start_date_only + timedelta(days=offset)
-            date_key = current_date.isoformat()
-            cumulative += data_by_date.get(date_key, 0)
-            result.append({'date': date_key, 'count': cumulative})
-
-        logger.info(f"✅ DASHBOARD DOCUMENTS OVER TIME SUCCESS | User: {user.email} | Data points: {len(result)}")
-        return Response(result, status=status.HTTP_200_OK)
-    except Exception as e:
-        logger.error(f"❌ DASHBOARD DOCUMENTS OVER TIME ERROR | User: {user.email} | Error: {str(e)}")
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 # Admin Views
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

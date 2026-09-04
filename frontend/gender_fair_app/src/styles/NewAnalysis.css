@@ -114,10 +114,41 @@
 
 .analysis-left-panel h4,
 .analysis-right-panel h4 {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.replacement-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.replace-all-button {
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: #ede9fe;
+  color: #5b21b6;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.replace-all-button:hover:not(:disabled) {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.replace-all-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .replacement-items {

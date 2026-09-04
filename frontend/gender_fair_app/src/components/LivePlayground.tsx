@@ -22,7 +22,7 @@ export default function LivePlayground(){
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_auto_1fr] items-center">
           <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-6">
             <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Original</p>
-            <div className="mt-5 rounded-3xl border border-white/10 bg-slate-900/90 p-6 text-lg leading-8 text-slate-200">
+            <div className="mt-5 rounded-3xl border border-white/10 bg-slate-900/90 p-6 text-base leading-7 text-slate-200">
               The <span className="font-semibold text-rose-400">chairman</span> instructed <span className="font-semibold text-rose-400">his</span> employees.
             </div>
           </div>
@@ -31,7 +31,7 @@ export default function LivePlayground(){
 
           <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-6">
             <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Inclusive alternative</p>
-            <div className="mt-5 rounded-3xl border border-white/10 bg-slate-900/90 p-6 text-lg leading-8 text-white">
+            <div className="mt-5 rounded-3xl border border-white/10 bg-slate-900/90 p-6 text-base leading-7 text-white">
               The <span className="font-semibold text-emerald-300">chairperson</span> instructed <span className="font-semibold text-emerald-300">their</span> employees.
             </div>
           </div>

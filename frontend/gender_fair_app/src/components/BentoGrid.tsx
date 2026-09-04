@@ -12,7 +12,7 @@ export default function BentoGrid(){
                 <FileText className="h-5 w-5" />
               </div>
               <h3 className="mt-5 text-xl font-semibold text-white">Text input</h3>
-              <p className="mt-3 text-lg text-slate-400">Paste or type content into the editor and get instant analysis.</p>
+              <p className="mt-3 text-base text-slate-400">Paste or type content into the editor and get instant analysis.</p>
             </motion.div>
           </div>
 
@@ -22,7 +22,7 @@ export default function BentoGrid(){
                 <Upload className="h-5 w-5" />
               </div>
               <h3 className="mt-5 text-xl font-semibold text-white">PDF upload</h3>
-              <p className="mt-3 text-lg text-slate-400">Upload documents for deep review without losing formatting.</p>
+              <p className="mt-3 text-base text-slate-400">Upload documents for deep review without losing formatting.</p>
             </motion.div>
           </div>
         </div>
@@ -31,7 +31,7 @@ export default function BentoGrid(){
           <motion.div whileHover={{ y: -6 }}>
             <div className="inline-flex items-center justify-center rounded-full bg-white/5 px-4 py-2 text-sm uppercase tracking-[0.25em] text-slate-300">Real-time replacement engine</div>
             <h3 className="mt-6 text-3xl font-semibold text-white">Smart suggestions, seamless edits</h3>
-            <p className="mt-4 text-lg text-slate-400">Our engine highlights biased phrases and suggests inclusive alternatives as you review your drafts.</p>
+            <p className="mt-4 text-base text-slate-400">Our engine highlights biased phrases and suggests inclusive alternatives as you review your drafts.</p>
 
             <div className="mt-8 flex items-center gap-3 text-slate-300">
               <div className="inline-flex h-11 w-11 items-center justify-center rounded-3xl bg-purple-500/10 text-purple-300"><Sparkles className="h-5 w-5" /></div>

@@ -13,7 +13,7 @@ export default function CTA(){
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Ready to reduce bias across every document?</p>
               <h2 className="mt-4 text-4xl font-semibold text-white">Make your writing inclusive today</h2>
-              <p className="mt-4 max-w-2xl text-lg text-slate-300">Start a free trial or book a demo to bring inclusive language workflows into your team's editing process.</p>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">Start a free trial or book a demo to bring inclusive language workflows into your team's editing process.</p>
             </div>
 
           <div className="flex flex-col gap-4 sm:flex-row sm:justify-end">

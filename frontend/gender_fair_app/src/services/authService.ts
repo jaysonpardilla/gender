@@ -103,11 +103,6 @@ export const analysisService = {
     return api.get('/dashboard/top-bias-words/', { params });
   },
 
-  getDashboardDocumentsOverTime: (days?: number) => {
-    const params = days ? { days } : {};
-    return api.get('/dashboard/documents-over-time/', { params });
-  },
-
   // Save analysis result (update existing document with approved replacements count)
   updateDocument: (docId: number, data: { approved_replacements_count?: number; processed_text?: string }) =>
     api.patch(`/document/${docId}/`, data),

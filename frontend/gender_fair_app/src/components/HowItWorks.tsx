@@ -15,7 +15,7 @@ export default function HowItWorks(){
           <div key={s.title} className="rounded-xl bg-white/5 border border-white/10 p-6">
             <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: idx * 0.1 }}>
               <div className="text-lg font-semibold text-white">{s.title}</div>
-              <div className="text-sm text-slate-300 mt-2">{s.desc}</div>
+              <div className="text-base leading-7 text-slate-300 mt-2">{s.desc}</div>
             </motion.div>
           </div>
         ))}

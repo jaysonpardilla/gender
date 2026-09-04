@@ -29,7 +29,7 @@ export default function ShowcaseCards() {
                 <card.icon className="h-5 w-5" />
               </div>
               <h3 className="mt-5 text-lg font-semibold text-white">{card.title}</h3>
-              <p className="mt-3 text-lg leading-6 text-slate-400">{card.description}</p>
+              <p className="mt-3 text-base leading-7 text-slate-400">{card.description}</p>
             </motion.div>
           </div>
         ))}

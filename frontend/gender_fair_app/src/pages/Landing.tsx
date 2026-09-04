@@ -10,7 +10,7 @@ import Footer from '../components/Footer';
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-slate-950 text-white selection:bg-purple-300 selection:text-slate-900 text-[18px] leading-7">
+    <div className="min-h-screen bg-slate-950 text-white selection:bg-purple-300 selection:text-slate-900 text-base leading-7">
       <Navbar />
 
       <main>

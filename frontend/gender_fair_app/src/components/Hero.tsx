@@ -5,7 +5,7 @@ import heroImage from '../assets/hero-section-right.png';
 
 export default function Hero() {
   return (
-    <section id="hero" className="scroll-mt-24 relative overflow-hidden px-6 py-10 lg:px-5 lg:py-15">
+    <section id="hero" className="scroll-mt-24 relative overflow-hidden px-6 py-10 lg:px-15 lg:py-15">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.25),_transparent_15%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.16),_transparent_20%)]" />
       <div className="absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-slate-950/70 to-transparent" />
       <div className="relative mx-auto max-w-7xl">
@@ -21,13 +21,13 @@ export default function Hero() {
               RULE-BASED • ACCURATE • REAL-TIME
             </div>
 
-            <h1 className="mt-8 max-w-3xl text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            <h1 className="mt-8 max-w-4xl text-4xl font-bold tracking-tight text-white sm:text-4xl">
               Promote Inclusive Writing with{' '}
               <span className="bg-gradient-to-r from-purple-400 via-fuchsia-400 to-indigo-300 bg-clip-text text-transparent">
                 Gender-Fair Language Analysis
               </span>
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300">
               Detect gender bias, receive intelligent suggestions, and improve fairness in academic and professional writing with one polished platform.
             </p>
 
@@ -70,7 +70,7 @@ export default function Hero() {
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.55, ease: 'easeOut' }}
           >
-            <div className="mx-auto max-w-[980px] overflow-hidden rounded-[1rem] shadow-2xl shadow-slate-950/40 lg:max-w-none">
+            <div className="mx-auto max-w-[980px] overflow-hidden rounded-[1rem] shadow-2xl shadow-slate-950/40 lg:ml-auto lg:w-[85%]">
               <img src={heroImage} alt="Hero dashboard preview" className="w-full rounded-[1rem] object-cover" />
             </div>
           </motion.div>

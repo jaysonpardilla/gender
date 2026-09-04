@@ -105,6 +105,18 @@ const NewAnalysis: React.FC = () => {
     }, 0);
   };
 
+  const approveAllReplacements = () => {
+    const approvedReplacements = replacements.map(item => ({ ...item, approved: true }));
+    setReplacements(approvedReplacements);
+    setRecordedReplacements(approvedReplacements);
+
+    if (lastDocumentId != null) {
+      analysisService.updateDocument(lastDocumentId, {
+        approved_replacements_count: approvedReplacements.length,
+      }).catch(err => console.error('Failed to update document:', err));
+    }
+  };
+
   const handleAnalyze = () => {
     const formattedDate = new Date().toLocaleDateString('en-US', {
       month: 'long',
@@ -266,7 +278,18 @@ const NewAnalysis: React.FC = () => {
 
               <div className="analysis-panels" ref={resultSectionRef}>
                 <div className="analysis-left-panel">
-                  <h4>Bias Replacements</h4>
+                  <div className="replacement-heading">
+                    <h4>Bias Replacements</h4>
+                    <button
+                      className="replace-all-button"
+                      onClick={approveAllReplacements}
+                      disabled={detectedItems.length === 0 || detectedItems.every(item => item.approved)}
+                      type="button"
+                      title="Approve all detected replacements"
+                    >
+                      Replace All
+                    </button>
+                  </div>
                   <div className="replacement-items">
                     {detectedItems.length === 0 ? (
                       <div className="no-detected">No bias words found in the current text.</div>

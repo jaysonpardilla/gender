@@ -26,7 +26,6 @@ urlpatterns = [
     path('dashboard/recent-analyses/', views.dashboard_recent_analyses_view, name='dashboard-recent-analyses'),
     path('dashboard/top-bias-words/', views.dashboard_top_bias_words_view, name='dashboard-top-bias-words'),
     path('bias-mappings/', views.bias_mappings_view, name='bias-mappings'),
-    path('dashboard/documents-over-time/', views.dashboard_documents_over_time_view, name='dashboard-documents-over-time'),
     path('support-message/', views.support_message_view, name='support-message'),
     
     # Admin endpoints
