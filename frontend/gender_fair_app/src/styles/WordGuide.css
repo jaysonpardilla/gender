@@ -71,20 +71,14 @@
 }
 
 .category-slider {
-  overflow: hidden;
-  position: relative;
   width: 100%;
 }
 
 .category-track {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 0;
-  animation: slideCategories 24s linear infinite;
-}
-
-.category-track:hover {
-  animation-play-state: paused;
 }
 
 .filter-btn {
@@ -111,15 +105,6 @@
   background: #dbeafe;
   color: #1f2937;
   border-color: #dbeafe;
-}
-
-@keyframes slideCategories {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
 }
 
 /* Info Banner */

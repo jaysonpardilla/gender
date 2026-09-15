@@ -206,7 +206,7 @@ const WordGuide: React.FC = () => {
             <div className="search-section">
               <div className="category-slider">
                 <div className="category-track">
-                  {categories.concat(categories).map((cat, idx) => (
+                  {categories.map((cat, idx) => (
                     <button
                       key={`${cat}-${idx}`}
                       className={`filter-btn ${selectedCategory === cat ? 'active' : ''}`}

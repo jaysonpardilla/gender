@@ -119,11 +119,11 @@ body, html {
 
 @keyframes glowPulse {
   0%, 100% {
-    filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.3)) drop-shadow(0 0 24px rgba(59, 130, 246, 0.15));
+    filter: none;
     transform: scale(1);
   }
   50% {
-    filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.5)) drop-shadow(0 0 40px rgba(59, 130, 246, 0.25));
+    filter: none;
     transform: scale(1.02);
   }
 }
@@ -640,7 +640,7 @@ body, html {
   border: 1px solid rgba(103, 148, 219, 0.853);
   border-radius: 20px;
   padding: 32px 28px;
-  box-shadow: 0 1px 3px rgba(221, 107, 122, 0.679);
+  box-shadow: none;
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
   overflow: hidden;
@@ -661,9 +661,9 @@ body, html {
 } 
 
 .fairness-chart:hover {
-  transform: translateY(-4px);
+  transform: none;
   background: #e2fdff78;
-  box-shadow: 0 4px 12px rgba(65, 226, 232, 0.658);
+  box-shadow: none;
   border-color: rgba(59, 131, 246, 0.587);
 }
 
@@ -694,7 +694,7 @@ body, html {
   width: 200px;
   height: 200px;
   margin: 0 auto 0px;
-  animation: glowPulse 3s ease-in-out infinite;
+  animation: none;
   transform-origin: center;
   position: relative;
   z-index: 1;
@@ -706,7 +706,7 @@ body, html {
   animation: drawRing 2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   transform: rotate(-90deg);
   transform-origin: 100px 100px;
-  filter: drop-shadow(0 4px 12px rgba(228, 138, 164, 0.5));
+  filter: none;
   stroke: url(#scoreGradient);
   transition: stroke-dashoffset 0.3s ease;
 }
@@ -733,7 +733,7 @@ body, html {
   font-size: 3rem;
   font-weight: 800;
   color: #ffffff;
-  text-shadow: 0 0 20px rgba(59, 130, 246, 0.5), 0 0 40px rgba(59, 130, 246, 0.25);
+  text-shadow: none;
   position: relative;
   z-index: 1;
 }
@@ -745,7 +745,7 @@ body, html {
   height: 6px;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(59, 130, 246, 0.8), rgba(96, 165, 250, 0.4));
-  box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+  box-shadow: none;
 }
 
 @keyframes fadeIn {
@@ -1854,7 +1854,7 @@ body, html {
 .dashboard-content .score-percentage {
   fill: var(--dashboard-purple-800);
   color: var(--dashboard-purple-800);
-  text-shadow: 0 0 20px rgba(124, 58, 237, 0.34), 0 0 40px rgba(124, 58, 237, 0.16);
+  text-shadow: none;
 }
 
 .dashboard-content .fairness-chart svg text:not(.score-percentage) {
