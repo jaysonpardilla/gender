@@ -70,8 +70,8 @@ const LineChartSVG: FC<{ data: ChartData }> = ({ data }) => {
     <svg width="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
       <defs>
         <linearGradient id="lineAreaGrad" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.24" />
-          <stop offset="100%" stopColor="#eff6ff" stopOpacity="0.04" />
+          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.24" />
+          <stop offset="100%" stopColor="#f7f5ff" stopOpacity="0.04" />
         </linearGradient>
       </defs>
       <g>
@@ -91,13 +91,13 @@ const LineChartSVG: FC<{ data: ChartData }> = ({ data }) => {
         points={`${padding},${height - padding} ${points} ${padding + innerWidth},${height - padding}`}
         fill="url(#lineAreaGrad)"
       />
-      <polyline points={points} fill="none" stroke="#2563eb" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={points} fill="none" stroke="#6d28d9" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
       {data.map((d, i) => {
         const x = padding + i * stepX;
         const y = getY(d.value);
         return (
           <g key={d.month}>
-            <circle cx={x} cy={y} r={6} fill="#fff" stroke="#2563eb" strokeWidth={3} />
+            <circle cx={x} cy={y} r={6} fill="#fff" stroke="#6d28d9" strokeWidth={3} />
             <text x={x} y={y - 14} textAnchor="middle" fill="#0f172a" fontSize="12" fontWeight={700}>
               {d.value}%
             </text>

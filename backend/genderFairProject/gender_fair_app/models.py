@@ -7,11 +7,6 @@ class UserProfile(models.Model):
         ('user', 'User'),
         ('admin', 'Admin'),
     ]
-    THEME_CHOICES = [
-        ('light', 'Light'),
-        ('dark', 'Dark'),
-    ]
-    
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
     avatar = models.CharField(max_length=255, default='default_avatar.png', help_text='Path or URL to avatar')
@@ -21,13 +16,6 @@ class UserProfile(models.Model):
     analyses_count = models.IntegerField(default=0)
     biased_words_detected = models.IntegerField(default=0)
     average_score = models.FloatField(default=0.0)
-    
-    # Preferences
-    theme_preference = models.CharField(max_length=10, choices=THEME_CHOICES, default='light')
-    auto_save_enabled = models.BooleanField(default=True)
-    email_notifications_enabled = models.BooleanField(default=True)
-    ai_analysis_enabled = models.BooleanField(default=True)
-    two_factor_enabled = models.BooleanField(default=False)
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -96,4 +84,3 @@ class SupportMessage(models.Model):
 
     class Meta:
         ordering = ['-created_at']
-

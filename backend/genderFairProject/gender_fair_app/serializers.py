@@ -15,8 +15,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'user_email', 'user_first_name', 'user_last_name', 'role', 'avatar', 'bio', 
             'analyses_count', 'biased_words_detected', 'average_score',
-            'theme_preference', 'auto_save_enabled', 'email_notifications_enabled', 
-            'ai_analysis_enabled', 'two_factor_enabled',
             'created_at', 'updated_at'
         ]
 

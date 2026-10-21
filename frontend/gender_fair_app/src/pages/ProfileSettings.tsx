@@ -23,11 +23,6 @@ const ProfileSettings: React.FC = () => {
     analyses_count: 0,
     biased_words_detected: 0,
     average_score: 0,
-    theme_preference: 'light',
-    auto_save_enabled: true,
-    email_notifications_enabled: true,
-    ai_analysis_enabled: true,
-    two_factor_enabled: false,
     joined_at: '',
     last_login: '',
   });
@@ -118,11 +113,6 @@ const ProfileSettings: React.FC = () => {
           analyses_count: user.profile?.analyses_count || 0,
           biased_words_detected: user.profile?.biased_words_detected || 0,
           average_score: user.profile?.average_score || 0,
-          theme_preference: user.profile?.theme_preference || 'light',
-          auto_save_enabled: user.profile?.auto_save_enabled ?? true,
-          email_notifications_enabled: user.profile?.email_notifications_enabled ?? true,
-          ai_analysis_enabled: user.profile?.ai_analysis_enabled ?? true,
-          two_factor_enabled: user.profile?.two_factor_enabled ?? false,
           joined_at: user.date_joined || '',
           last_login: user.last_login || '',
         });
@@ -145,11 +135,6 @@ const ProfileSettings: React.FC = () => {
         profile: {
           avatar: profileData.avatar,
           bio: profileData.bio,
-          theme_preference: profileData.theme_preference,
-          auto_save_enabled: profileData.auto_save_enabled,
-          email_notifications_enabled: profileData.email_notifications_enabled,
-          ai_analysis_enabled: profileData.ai_analysis_enabled,
-          two_factor_enabled: profileData.two_factor_enabled,
         },
       };
       const res = await authService.updateCurrentUser(payload);
@@ -202,11 +187,6 @@ const ProfileSettings: React.FC = () => {
         profile: {
           avatar: profileData.avatar,
           bio: profileData.bio,
-          theme_preference: profileData.theme_preference,
-          auto_save_enabled: profileData.auto_save_enabled,
-          email_notifications_enabled: profileData.email_notifications_enabled,
-          ai_analysis_enabled: profileData.ai_analysis_enabled,
-          two_factor_enabled: profileData.two_factor_enabled,
         },
       };
 
