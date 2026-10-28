@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useMemo, Fragment, useRef, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Settings, Users, TrendingUp } from 'lucide-react';
+import { FileText, Settings, Users, TrendingUp, User as UserIcon } from 'lucide-react';
 import { adminService, authService } from '../services/authService';
 import Navigation from '../components/Navigation';
 import '../styles/UserDashboard.css';
@@ -402,7 +402,7 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-slate-50">
       <Navigation userEmail={userEmail} userInitials={getUserInitials()} onLogout={handleLogout} />
       <div className="relative min-h-[calc(100vh-70px)] pt-24">
-        <aside className="fixed left-0 top-[70px] h-[calc(100vh-70px)] w-72 overflow-y-auto border-r border-slate-200 bg-slate-900 p-4 text-white shadow-2xl">
+        <aside className="fixed left-0 top-[70px] flex h-[calc(100vh-70px)] w-72 flex-col overflow-y-auto border-r border-slate-200 bg-slate-900 p-4 text-white shadow-2xl">
           <div className="mb-6 border-b border-white/10 pb-4">
             <h2 className="mt-2 text-xl font-semibold text-white">Admin Dashboard</h2>
           </div>
@@ -438,6 +438,14 @@ export default function AdminDashboard() {
               );
             })}
           </nav>
+          <button
+            type="button"
+            onClick={() => navigate('/profile-settings')}
+            className="mt-auto flex w-full items-center gap-3 border-t border-white/10 px-4 py-4 pt-5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
+          >
+            <UserIcon size={18} />
+            <span>My Profile</span>
+          </button>
         </aside>
 
         <main className="w-full max-w-full overflow-x-hidden px-4 pb-8 sm:px-6 lg:ml-72 lg:w-[calc(100%-18rem)] lg:px-8 lg:pr-6">

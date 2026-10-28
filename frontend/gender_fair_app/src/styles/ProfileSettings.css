@@ -211,11 +211,10 @@
 
 /* Security Settings */
 .btn-outline {
-
   padding: 10px 16px;
-  background: white;
-  border: 1.5px solid var(--color-info);
-  color: var(--color-info);
+  background: #f5f3ff;
+  border: 1.5px solid #6d28d9;
+  color: #6d28d9;
   border-radius: 8px;
   font-weight: 600;
   font-size: 13px;
@@ -225,8 +224,8 @@
 }
 
 .btn-outline:hover {
-  background: var(--color-info);
-  color: rgb(151, 161, 255);
+  background: #6d28d9;
+  color: white;
 }
 
 .btn-block {

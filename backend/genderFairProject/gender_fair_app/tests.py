@@ -9,8 +9,29 @@ from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APIClient
 
-from gender_fair_app.models import BiasedWordMapping, Document
+from gender_fair_app.models import BiasedWordMapping, Document, UserProfile
 from gender_fair_app.utils import append_mappings_to_excel_file
+
+
+class SignupTests(TestCase):
+    def test_signup_creates_user_profile(self):
+        response = self.client.post(
+            '/api/auth/signup/',
+            {
+                'email': 'new-user@example.com',
+                'first_name': 'New',
+                'last_name': 'User',
+                'password': 'password123',
+                'password_confirm': 'password123',
+                'role': 'user',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(email='new-user@example.com')
+        profile = UserProfile.objects.get(user=user)
+        self.assertEqual(profile.role, 'user')
 
 
 class ExcelImportTests(TestCase):
