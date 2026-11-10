@@ -60,7 +60,7 @@ def load_dataset_to_db():
                 if biased_word and fair_word:
                     obj, created = BiasedWordMapping.objects.get_or_create(
                         biased_word=biased_word,
-                        defaults={'fair_word': fair_word}
+                        fair_word=fair_word,
                     )
                     if created:
                         loaded += 1
@@ -86,7 +86,7 @@ def load_dataset_to_db():
                     
                     obj, created = BiasedWordMapping.objects.get_or_create(
                         biased_word=biased_word,
-                        defaults={'fair_word': fair_word}
+                        fair_word=fair_word,
                     )
                     if created:
                         loaded += 1
@@ -98,6 +98,8 @@ def load_dataset_to_db():
         count = BiasedWordMapping.objects.count()
         try:
             cache.delete('gender_fair_dataset')
+            cache.delete('gender_fair_dataset_alternatives')
+            cache.delete('gender_fair_dataset_categories')
         except Exception:
             pass
         print(f"Loaded {count} biased word mappings from dataset.")
@@ -164,11 +166,39 @@ def get_dataset_dict():
             # If DB is not available or other error, fall through and try to read mappings (may raise)
             pass
 
-        mappings = BiasedWordMapping.objects.all()
-        dataset = {mapping.biased_word: mapping.fair_word for mapping in mappings}
+        mappings = BiasedWordMapping.objects.all().order_by('id')
+        dataset = {}
+        for mapping in mappings:
+            dataset.setdefault(mapping.biased_word, mapping.fair_word)
         cache.set(cache_key, dataset, 3600)  # Cache for 1 hour
     
     return dataset
+
+
+def get_dataset_alternatives():
+    """Return all fair alternatives for each biased word, in insertion order."""
+    get_dataset_dict()
+    cache_key = 'gender_fair_dataset_alternatives'
+    alternatives = cache.get(cache_key)
+    if alternatives is None:
+        alternatives = {}
+        for mapping in BiasedWordMapping.objects.all().order_by('id'):
+            alternatives.setdefault(mapping.biased_word, []).append(mapping.fair_word)
+        cache.set(cache_key, alternatives, 3600)
+    return alternatives
+
+
+def get_dataset_categories():
+    """Return one consistent category for each biased term in insertion order."""
+    get_dataset_dict()
+    cache_key = 'gender_fair_dataset_categories'
+    categories = cache.get(cache_key)
+    if categories is None:
+        categories = {}
+        for mapping in BiasedWordMapping.objects.all().order_by('id'):
+            categories.setdefault(mapping.biased_word.lower(), mapping.category or 'other')
+        cache.set(cache_key, categories, 3600)
+    return categories
 
 
 def get_dataset_from_excel():
@@ -180,12 +210,13 @@ def get_dataset_from_excel():
         if not BiasedWordMapping.objects.exists():
             load_dataset_to_db()
 
-        mappings = BiasedWordMapping.objects.all().order_by('biased_word')
+        mappings = BiasedWordMapping.objects.all().order_by('-id')
         return [
             {
                 'id': mapping.id,
                 'biased_word': mapping.biased_word,
                 'fair_word': mapping.fair_word,
+                'category': mapping.category or 'other',
             }
             for mapping in mappings
         ]
@@ -234,32 +265,21 @@ def _is_excel_header_row(row):
         'fair word',
         'fair alternative',
         'gender fair term',
+        'category',
     }
 
-    # Check for exact matches only (full words, case-insensitive)
+    normalized_keywords = {keyword.replace('_', ' ') for keyword in header_keywords}
     for cell in normalized:
-        # Normalize: remove leading/trailing spaces, convert to lowercase
-        cell_lower = cell.lower().strip()
-        
-        # Exact match check
-        if cell_lower in header_keywords:
+        cell_header = cell.lower().strip().replace('_', ' ')
+        if cell_header in normalized_keywords:
             return True
-        
-        # Check if any header keyword is a standalone word in the cell
-        # e.g., "gendered_term" or "gendered term" should match, but "fairterm1" should NOT
-        for keyword in header_keywords:
-            # Split by spaces and check if keyword appears as a complete word
-            cell_words = set(cell_lower.replace('_', ' ').split())
-            keyword_words = set(keyword.replace('_', ' ').split())
-            if keyword_words <= cell_words:  # keyword is subset of cell words
-                return True
     
     # Check for pattern: [id, gender*, fair*] or [id, biased*, fair*]
     if len(normalized) >= 2:
         cell0_lower = normalized[0].lower().replace('_', ' ')
         cell1_lower = normalized[1].lower().replace('_', ' ')
         
-        if 'id' in cell0_lower:
+        if cell0_lower.strip() == 'id':
             if ('gender' in cell1_lower or 'biased' in cell1_lower):
                 return True
 
@@ -348,6 +368,8 @@ def _extract_mappings_from_excel_file(uploaded_file):
     mappings = []
     header_row = None
     has_detected_headers = False
+    category_choices = dict(BiasedWordMapping.CATEGORY_CHOICES)
+    category_labels = {label.lower(): value for value, label in BiasedWordMapping.CATEGORY_CHOICES}
     
     # First pass: check if any row looks like a header
     for row_idx, row in enumerate(rows[:5]):  # Check first 5 rows only
@@ -380,6 +402,7 @@ def _extract_mappings_from_excel_file(uploaded_file):
 
         biased_idx = None
         fair_idx = None
+        category_idx = None
         
         # Only try header-based detection if we have headers
         if has_detected_headers and header_row:
@@ -391,6 +414,8 @@ def _extract_mappings_from_excel_file(uploaded_file):
                     biased_idx = idx
                 if normalized_header in {'fair_word', 'gender_fair_term', 'gender_fair_term', 'fair', 'replacement', 'fair alternative'}:
                     fair_idx = idx
+                if normalized_header == 'category':
+                    category_idx = idx
             if biased_idx is None:
                 for idx, header in enumerate(header_row):
                     if idx >= len(values):
@@ -403,7 +428,10 @@ def _extract_mappings_from_excel_file(uploaded_file):
                         continue
                     if 'fair' in header or 'replacement' in header or 'alternative' in header:
                         fair_idx = idx
-            logger.info(f"📥 ROW[{row_idx}] HEADER-BASED: biased_idx={biased_idx}, fair_idx={fair_idx}")
+            logger.info(
+                f"📥 ROW[{row_idx}] HEADER-BASED: biased_idx={biased_idx}, "
+                f"fair_idx={fair_idx}, category_idx={category_idx}"
+            )
 
         # If no headers detected, use column positions directly
         if biased_idx is None and fair_idx is None:
@@ -423,13 +451,31 @@ def _extract_mappings_from_excel_file(uploaded_file):
             fair_idx = 1 if len(values) > 1 else 0
 
         biased_word = values[biased_idx].strip().lower() if biased_idx < len(values) else ''
-        fair_word = values[fair_idx].strip() if fair_idx < len(values) else ''
+        fair_words = values[fair_idx].split(',') if fair_idx < len(values) else []
+        category = None
+        if category_idx is not None and category_idx < len(values) and values[category_idx].strip():
+            raw_category = values[category_idx].strip()
+            normalized_category = raw_category.lower().replace('-', '_').replace(' ', '_')
+            category = (
+                normalized_category
+                if normalized_category in category_choices
+                else category_labels.get(raw_category.lower())
+            )
+            if category is None:
+                raise ValueError(
+                    f"Invalid category '{raw_category}' in row {row_idx + 1}. "
+                    f"Choose one of: {', '.join(category_choices)}."
+                )
         
-        logger.info(f"📥 ROW[{row_idx}] EXTRACTED: biased='{biased_word}' (from col {biased_idx}), fair='{fair_word}' (from col {fair_idx})")
+        logger.info(
+            f"📥 ROW[{row_idx}] EXTRACTED: biased='{biased_word}', "
+            f"fair alternatives={fair_words}, category='{category or 'other'}'"
+        )
         
-        if biased_word and fair_word:
-            mappings.append((biased_word, fair_word))
-            logger.info(f"📥 ROW[{row_idx}] ✅ ADDED TO MAPPINGS")
+        valid_fair_words = [fair_word.strip() for fair_word in fair_words if fair_word.strip()]
+        if biased_word and valid_fair_words:
+            mappings.extend((biased_word, fair_word, category) for fair_word in valid_fair_words)
+            logger.info(f"📥 ROW[{row_idx}] ✅ ADDED {len(valid_fair_words)} MAPPING(S)")
         else:
             logger.info(f"📥 ROW[{row_idx}] ❌ REJECTED: empty biased_word or fair_word")
 
@@ -538,27 +584,31 @@ def append_mappings_to_excel_file(uploaded_file, target_path=None, merge_existin
         updated_rows = 0
 
         # Save all mappings from uploaded file directly to database
-        for biased_word, fair_word in imported_mappings:
+        for biased_word, fair_word, category in imported_mappings:
             if not biased_word or not fair_word:
                 continue
 
-            obj, created = BiasedWordMapping.objects.update_or_create(
+            obj, created = BiasedWordMapping.objects.get_or_create(
                 biased_word=biased_word,
-                defaults={'fair_word': fair_word}
+                fair_word=fair_word,
+                defaults={'category': category or 'other'},
             )
             
             if created:
                 added_rows += 1
                 logger.info(f"✅ Added new mapping: {biased_word} → {fair_word}")
-            elif obj.fair_word != fair_word:
-                obj.fair_word = fair_word
-                obj.save()
-                updated_rows += 1
-                logger.info(f"🔄 Updated mapping: {biased_word} → {fair_word}")
+            else:
+                if category is not None and obj.category != category:
+                    obj.category = category
+                    obj.save(update_fields=['category'])
+                    updated_rows += 1
+                logger.info(f"⏭️ Mapping already exists: {biased_word} → {fair_word}")
 
         # Clear cache to reflect new data
         try:
             cache.delete('gender_fair_dataset')
+            cache.delete('gender_fair_dataset_alternatives')
+            cache.delete('gender_fair_dataset_categories')
         except Exception:
             pass
 
@@ -593,16 +643,15 @@ def append_mapping_to_excel(biased_word: str, fair_word: str):
         logger.warning('append_mapping_to_excel rejected test values ending with -direct')
         return False
 
-    obj, created = BiasedWordMapping.objects.update_or_create(
+    obj, created = BiasedWordMapping.objects.get_or_create(
         biased_word=biased_word,
-        defaults={'fair_word': fair_word}
+        fair_word=fair_word,
     )
-    if not created and obj.fair_word != fair_word:
-        obj.fair_word = fair_word
-        obj.save()
 
     try:
         cache.delete('gender_fair_dataset')
+        cache.delete('gender_fair_dataset_alternatives')
+        cache.delete('gender_fair_dataset_categories')
     except Exception:
         pass
 
@@ -631,6 +680,17 @@ def tokenize_text(text):
     return tokens
 
 
+def preserve_replacement_case(original: str, replacement: str) -> str:
+    """Match replacement casing to a lowercase, uppercase, or capitalized term."""
+    if original.islower():
+        return replacement.lower()
+    if original.isupper():
+        return replacement.upper()
+    if original[0].isupper() and (original[1:].islower() or original.istitle()):
+        return replacement.capitalize()
+    return replacement
+
+
 def analyze_text(text):
     """
     Analyze text for biased words and return results.
@@ -644,9 +704,13 @@ def analyze_text(text):
         }
     """
     dataset = get_dataset_dict()
+    dataset_alternatives = get_dataset_alternatives()
+    dataset_categories = get_dataset_categories()
 
     detected_words = []
     replacements = {}
+    replacement_alternatives = {}
+    detected_term_categories = {}
 
     # Sort biased keys by length (longest first) so multi-word phrases match before single words
     biased_keys = sorted(dataset.keys(), key=lambda k: -len(k))
@@ -656,6 +720,7 @@ def analyze_text(text):
 
     for biased in biased_keys:
         fair = dataset.get(biased, '')
+        fair_words = dataset_alternatives.get(biased, [fair])
         if not biased:
             continue
         # Word-boundary aware, case-insensitive
@@ -671,12 +736,14 @@ def analyze_text(text):
                 continue
 
             matched_text = match.group(0)
-            # Preserve capitalization
-            fair_word = fair
-            if matched_text and matched_text[0].isupper() and fair_word:
-                fair_word = fair_word[0].upper() + fair_word[1:]
+            fair_words_for_match = [
+                preserve_replacement_case(matched_text, fair_word)
+                for fair_word in fair_words
+            ]
 
-            replacements[matched_text] = fair_word
+            replacements[matched_text] = fair_words_for_match[0] if fair_words_for_match else fair
+            replacement_alternatives[matched_text] = fair_words_for_match or [fair]
+            detected_term_categories[biased.lower()] = dataset_categories.get(biased.lower(), 'other')
             detected_words.append(biased)
 
             for i in range(start, end):
@@ -694,10 +761,7 @@ def analyze_text(text):
             continue
 
         def _replace_case(m):
-            mt = m.group(0)
-            if mt and mt[0].isupper():
-                return fair[0].upper() + fair[1:] if len(fair) > 1 else fair.upper()
-            return fair
+            return preserve_replacement_case(m.group(0), fair)
 
         processed_text = pattern.sub(_replace_case, processed_text)
 
@@ -708,7 +772,9 @@ def analyze_text(text):
         'original_text': text,
         'processed_text': processed_text,
         'detected_words': detected_words,
-        'replacements': replacements
+        'replacements': replacements,
+        'replacement_alternatives': replacement_alternatives,
+        'detected_term_categories': detected_term_categories,
     }
 
 
@@ -907,6 +973,25 @@ def calculate_text_width_in_pdf(page, text, fontname, fontsize):
         return len(text) * fontsize * 0.5  # fallback
 
 
+def _pdf_font_alias(font_name):
+    normalized_name = re.sub(r'^[A-Z]{6}\+', '', font_name or '').lower()
+    standard_fonts = {
+        'helvetica': 'helv',
+        'helvetica-bold': 'hebo',
+        'helvetica-oblique': 'heit',
+        'helvetica-boldoblique': 'hebi',
+        'times-roman': 'tiro',
+        'times-bold': 'tibo',
+        'times-italic': 'tiit',
+        'times-bolditalic': 'tibi',
+        'courier': 'cour',
+        'courier-bold': 'cobo',
+        'courier-oblique': 'coit',
+        'courier-boldoblique': 'cobi',
+    }
+    return standard_fonts.get(normalized_name)
+
+
 def modify_pdf_with_replacements(pdf_bytes, replacements):
     """
     Modify a PDF by replacing text using PyMuPDF (fitz).
@@ -955,6 +1040,8 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
         # Process each page
         for page_num in range(len(pdf_doc)):
             page = pdf_doc[page_num]
+            embedded_font_aliases = {}
+            page_fonts = page.get_fonts(full=True)
             print(f"\n📄 Processing page {page_num + 1}/{len(pdf_doc)}")
 
             # For each approved replacement
@@ -1013,9 +1100,13 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
                     # Process each match
                     for idx, rect in enumerate(search_results):
                         try:
+                            matched_text = page.get_textbox(rect).strip() or original
+                            case_adjusted_text = preserve_replacement_case(matched_text, new_text)
+
                             # Extract font metrics from matched text
                             fontsize = 12  # default
                             fontname = "Helvetica"
+                            matched_span = None
                             
                             # Try to get exact font from text dict
                             try:
@@ -1028,15 +1119,39 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
                                             if not (span_rect & rect).is_empty:
                                                 fontsize = span.get('size', fontsize)
                                                 fontname = span.get('font', fontname)
+                                                matched_span = span
                                                 break
                             except Exception as e:
                                 print(f"      ⚠️ Font extraction failed: {e}")
                                 # Fallback: estimate fontsize from rect height
                                 fontsize = max(rect.height * 0.8, 8)
+
+                            insert_font_name = _pdf_font_alias(fontname) or fontname
+                            normalized_font_name = re.sub(r'^[A-Z]{6}\+', '', fontname).lower()
+                            matching_font = next(
+                                (
+                                    font_info for font_info in page_fonts
+                                    if re.sub(r'^[A-Z]{6}\+', '', font_info[3]).lower() == normalized_font_name
+                                ),
+                                None,
+                            )
+                            if matching_font and matching_font[0] > 0:
+                                font_xref = matching_font[0]
+                                if font_xref not in embedded_font_aliases:
+                                    try:
+                                        extracted_font = pdf_doc.extract_font(font_xref)
+                                        font_buffer = extracted_font[3]
+                                        if font_buffer:
+                                            alias = f"GenderFair{page_num}_{font_xref}"
+                                            page.insert_font(fontname=alias, fontbuffer=font_buffer)
+                                            embedded_font_aliases[font_xref] = alias
+                                    except Exception as font_err:
+                                        print(f"      ⚠️ Could not embed original font '{fontname}': {font_err}")
+                                insert_font_name = embedded_font_aliases.get(font_xref, insert_font_name)
                             
                             # ✅ FIX #1: Calculate width of original and replacement text
                             original_width = calculate_text_width_in_pdf(page, original, fontname, fontsize)
-                            replacement_width = calculate_text_width_in_pdf(page, new_text, fontname, fontsize)
+                            replacement_width = calculate_text_width_in_pdf(page, case_adjusted_text, fontname, fontsize)
                             
                             print(f"      📐 Original text rect: ({rect.x0:.1f}, {rect.y0:.1f}, {rect.x1:.1f}, {rect.y1:.1f})")
                             print(f"      📏 Width - Original: {original_width:.1f}, Replacement: {replacement_width:.1f}")
@@ -1067,20 +1182,30 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
                             # ✅ FIX #3: Insert replacement text at same position
                             # The expanded white rect above prevents any overlay issues
                             inserted = False
-                            text_baseline = rect.y1 - (fontsize * 0.2)
+                            text_baseline = (
+                                matched_span.get('origin', (rect.x0, rect.y1))[1]
+                                if matched_span
+                                else rect.y1 - (fontsize * 0.2)
+                            )
                             text_point = fitz.Point(rect.x0, text_baseline)
+                            span_color = matched_span.get('color', 0) if matched_span else 0
+                            text_color = (
+                                ((span_color >> 16) & 255) / 255,
+                                ((span_color >> 8) & 255) / 255,
+                                (span_color & 255) / 255,
+                            )
                             
-                            # Try with the original font first
+                            # Use the original embedded font when available, preserving its style.
                             try:
                                 page.insert_text(
                                     text_point,
-                                    new_text,
+                                    case_adjusted_text,
                                     fontsize=fontsize,
-                                    fontname=fontname,
-                                    color=(0, 0, 0),
+                                    fontname=insert_font_name,
+                                    color=text_color,
                                     render_mode=0
                                 )
-                                print(f"      ✅ Inserted replacement: '{new_text}'")
+                                print(f"      ✅ Inserted replacement: '{case_adjusted_text}'")
                                 inserted = True
                             except Exception as font_err:
                                 print(f"      ⚠️ Font '{fontname}' failed: {font_err}")
@@ -1090,10 +1215,10 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
                                     try:
                                         page.insert_text(
                                             text_point,
-                                            new_text,
+                                            case_adjusted_text,
                                             fontsize=fontsize,
                                             fontname=fallback_font,
-                                            color=(0, 0, 0)
+                                            color=text_color
                                         )
                                         print(f"      ✅ Inserted with fallback font '{fallback_font}'")
                                         inserted = True
@@ -1106,9 +1231,9 @@ def modify_pdf_with_replacements(pdf_bytes, replacements):
                                     try:
                                         page.insert_text(
                                             text_point,
-                                            new_text,
+                                            case_adjusted_text,
                                             fontsize=fontsize,
-                                            color=(0, 0, 0)
+                                            color=text_color
                                         )
                                         print(f"      ✅ Inserted with default font")
                                         inserted = True
@@ -1361,7 +1486,10 @@ def apply_text_replacements_to_structure(
                 # Build a regex that preserves original case pattern
                 pattern = re.compile(re.escape(original), re.IGNORECASE)
                 if pattern.search(block.text):
-                    block.text = pattern.sub(new_text, block.text)
+                    block.text = pattern.sub(
+                        lambda match: preserve_replacement_case(match.group(0), new_text),
+                        block.text,
+                    )
                     block.is_modified = True
                     total_replacements += 1
                     

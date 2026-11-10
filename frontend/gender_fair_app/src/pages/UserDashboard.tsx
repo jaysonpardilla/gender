@@ -250,12 +250,12 @@ const UserDashboard: React.FC = () => {
           </div>
           {/* Charts Section */}
           <div className="charts-section"> 
-            {/* Top 7 Bias Words */}
+            {/* Top 5 Bias Words */}
             <div className="top-bias-words-section">
-              <h3>Top 7 Bias Words</h3>
+              <h3>Top 5 Bias Words</h3>
               <div className="bar-chart-container">
                 {topBiasWords.length > 0 ? (
-                  topBiasWords.slice(0, 7).map((word, index) => {
+                  topBiasWords.slice(0, 5).map((word, index) => {
                     const maxCount = Math.max(...topBiasWords.slice(0, 7).map(w => w.count), 1);
                     const percentage = (word.count / maxCount) * 100;
                     return (

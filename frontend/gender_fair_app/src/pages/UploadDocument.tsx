@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import Navigation from '../components/Navigation';
 import DocumentPreview from '../components/DocumentPreview';
 import { analysisService } from '../services/authService';
+import { getGenderTermCategoryLabel } from '../utils/genderTermCategories';
 import '../styles/UploadDocument.css';
 import '../styles/DocumentPreview.css';
 
@@ -20,6 +21,8 @@ interface UploadedFile {
 interface AnalysisResult {
   detected_words: string[];
   replacements: { [key: string]: string };
+  replacement_alternatives: { [key: string]: string[] };
+  detected_term_categories: { [key: string]: string };
   original_text: string;
   processed_text: string;
   file_data: string;
@@ -29,6 +32,8 @@ interface AnalysisResult {
 interface WordReplacement {
   original: string;
   replacement: string;
+  alternatives: string[];
+  category: string;
   approved: boolean;
   instanceId: string;
 }
@@ -45,6 +50,7 @@ const UploadDocument: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
+  const [focusReplacement, setFocusReplacement] = useState<WordReplacement | null>(null);
   
   // UI feedback states
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +192,7 @@ const UploadDocument: React.FC = () => {
     setSelectedFile(file);
     setAnalysisResult(null);
     setWordReplacements([]);
+    setFocusReplacement(null);
     setHasSavedAnalysis(false);
   };
 
@@ -255,6 +262,8 @@ const UploadDocument: React.FC = () => {
         setAnalysisResult({
           detected_words: analysis.detected_words,
           replacements: analysis.replacements,
+          replacement_alternatives: analysis.replacement_alternatives || {},
+          detected_term_categories: analysis.detected_term_categories || {},
           original_text: analysis.original_text || fileContent,
           processed_text: fileContent,
           file_data: analysis.file_data || '',
@@ -274,13 +283,37 @@ const UploadDocument: React.FC = () => {
           return matchingKey ? replacementsObj[matchingKey] : word;
         };
         
+        const replacementAlternatives = analysis.replacement_alternatives || {};
+        const detectedTermCategories = analysis.detected_term_categories || {};
+        const getAlternatives = (word: string): string[] => {
+          const matchingKey = Object.keys(replacementAlternatives).find((key) => key === word)
+            || Object.keys(replacementAlternatives).find(
+            (key) => key.toLowerCase() === word.toLowerCase()
+          );
+          const alternatives = matchingKey ? replacementAlternatives[matchingKey] : [];
+          return Array.isArray(alternatives) && alternatives.length > 0
+            ? alternatives
+            : [getReplacement(word, analysis.replacements)];
+        };
+        const getCategory = (word: string): string => {
+          const matchingKey = Object.keys(detectedTermCategories).find(
+            (key) => key.toLowerCase() === word.toLowerCase()
+          );
+          return matchingKey ? detectedTermCategories[matchingKey] : 'other';
+        };
+
         const replacements: WordReplacement[] = analysis.detected_words.map((word: string | Record<string, unknown>, index: number) => {
-          // Handle both string and object formats from backend
-          const wordStr = typeof word === 'string' ? word : (word.word || word.original || '') as string;
-          const replacementValue = getReplacement(wordStr, analysis.replacements);
+          const detectedWord = typeof word === 'string' ? word : (word.word || word.original || '') as string;
+          const wordStr = Object.keys(analysis.replacements).find(
+            (key) => key.toLowerCase() === detectedWord.toLowerCase()
+          ) || detectedWord;
+          const alternatives = getAlternatives(wordStr);
+          const replacementValue = alternatives[0];
           const builtReplacement = {
             original: wordStr,
             replacement: replacementValue,
+            alternatives,
+            category: getCategory(wordStr),
             approved: false,  // ALWAYS false on initial load - NEVER use backend approved value
             instanceId: `${wordStr.toLowerCase()}_${index}_${Date.now()}`, // Unique ID per occurrence
           };
@@ -353,7 +386,7 @@ const UploadDocument: React.FC = () => {
       }
 
       // Request server to generate corrected file (server applies replacements)
-      const originalText = analysisResult.processed_text || analysisResult.original_text || '';
+      const originalText = analysisResult.original_text || analysisResult.processed_text || '';
       const fileType = analysisResult.file_type || selectedFile.type.split('/').pop() || 'txt';
       const fileName = selectedFile.name;
 
@@ -398,6 +431,9 @@ const UploadDocument: React.FC = () => {
   const toggleApproval = (instanceId: string) => {
     const item = wordReplacements.find(w => w.instanceId === instanceId);
     console.log(`🔄 Toggling approval for instanceId ${instanceId}:`, { before: item });
+    if (item) {
+      setFocusReplacement({ ...item, approved: !item.approved });
+    }
     setWordReplacements(prev => {
       const next = prev.map((item) => 
         item.instanceId === instanceId ? { ...item, approved: !item.approved } : item
@@ -410,8 +446,22 @@ const UploadDocument: React.FC = () => {
     });
   };
 
+  const selectAlternative = (instanceId: string, replacement: string) => {
+    setWordReplacements((prev) => prev.map((item) =>
+      item.instanceId === instanceId ? { ...item, replacement } : item
+    ));
+    setFocusReplacement((current) =>
+      current?.instanceId === instanceId ? { ...current, replacement } : current
+    );
+    setHasSavedAnalysis(false);
+  };
+
   const approveAllReplacements = () => {
     setWordReplacements(prev => prev.map(item => ({ ...item, approved: true })));
+    const firstUnapproved = wordReplacements.find(item => !item.approved);
+    if (firstUnapproved) {
+      setFocusReplacement({ ...firstUnapproved, approved: true });
+    }
     setHasSavedAnalysis(false);
   };
 
@@ -643,6 +693,7 @@ const UploadDocument: React.FC = () => {
                       onClick={() => {
                         setAnalysisResult(null);
                         setWordReplacements([]);
+                        setFocusReplacement(null);
                         setSelectedFile(null);
                       }}
                     >
@@ -695,8 +746,22 @@ const UploadDocument: React.FC = () => {
                         >
                           <div className="replacement-content">
                             <span className="original-word">{replacement.original}</span>
+                            <span className="replacement-category">{getGenderTermCategoryLabel(replacement.category)}</span>
                             <span className="arrow">→</span>
-                            <span className="replacement-word">{replacement.replacement}</span>
+                            {replacement.alternatives.length > 1 ? (
+                              <select
+                                value={replacement.replacement}
+                                onChange={(event) => selectAlternative(replacement.instanceId, event.target.value)}
+                                aria-label={`Fair alternative for ${replacement.original}`}
+                                className="replacement-word"
+                              >
+                                {replacement.alternatives.map((alternative) => (
+                                  <option key={alternative} value={alternative}>{alternative}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="replacement-word">{replacement.replacement}</span>
+                            )}
                           </div>
                           <button
                             className={`check-btn ${replacement.approved ? 'checked' : ''}`}
@@ -734,6 +799,7 @@ const UploadDocument: React.FC = () => {
                         fileType={analysisResult.file_type}
                         fileData={analysisResult.file_data}
                         wordReplacements={wordReplacements}
+                        focusReplacement={focusReplacement}
                         downloadEnabled={hasSavedAnalysis}
                       />
 
@@ -755,4 +821,3 @@ const UploadDocument: React.FC = () => {
 };
 
 export default UploadDocument;
-

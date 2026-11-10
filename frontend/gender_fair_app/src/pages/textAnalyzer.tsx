@@ -4,10 +4,13 @@ import Sidebar from '../components/Sidebar';
 import Navigation from '../components/Navigation';
 import '../styles/NewAnalysis.css';
 import { analysisService } from '../services/authService';
+import { getGenderTermCategoryLabel } from '../utils/genderTermCategories';
 
 interface ReplacementItem {
   original: string;
   replacement: string;
+  alternatives: string[];
+  category: string;
   approved: boolean;
 }
 
@@ -46,8 +49,15 @@ const NewAnalysis: React.FC = () => {
     const base = originalText || text;
     return replacements.reduce((currentText, replacement) => {
       if (!replacement.approved) return currentText;
-      const regex = new RegExp(`\\b${escapeRegExp(replacement.original)}\\b`, 'gi');
-      return regex.test(currentText) ? currentText.replace(regex, replacement.replacement) : currentText;
+      const regex = new RegExp(`\\b${escapeRegExp(replacement.original)}\\b`, 'g');
+      return currentText.replace(regex, (matchedWord) => {
+        if (matchedWord === matchedWord.toLowerCase()) return replacement.replacement.toLowerCase();
+        if (matchedWord === matchedWord.toUpperCase()) return replacement.replacement.toUpperCase();
+        if (matchedWord[0] === matchedWord[0].toUpperCase() && matchedWord.slice(1) === matchedWord.slice(1).toLowerCase()) {
+          return replacement.replacement.charAt(0).toUpperCase() + replacement.replacement.slice(1).toLowerCase();
+        }
+        return replacement.replacement;
+      });
     }, base);
   }, [originalText, text, replacements]);
 
@@ -81,7 +91,14 @@ const NewAnalysis: React.FC = () => {
         const already = prevRecorded.find(r => r.original === original);
         if (!already) {
           const replacement = currentItem?.replacement || '';
-          return [...prevRecorded, { original, replacement, approved: true }];
+          return [...prevRecorded, {
+            ...currentItem,
+            original,
+            replacement,
+            alternatives: currentItem?.alternatives || [replacement],
+            category: currentItem?.category || 'other',
+            approved: true,
+          }];
         }
         return prevRecorded;
       } else {
@@ -117,6 +134,15 @@ const NewAnalysis: React.FC = () => {
     }
   };
 
+  const selectAlternative = (original: string, replacement: string) => {
+    setReplacements((prev) => prev.map((item) =>
+      item.original === original ? { ...item, replacement } : item
+    ));
+    setRecordedReplacements((prev) => prev.map((item) =>
+      item.original === original ? { ...item, replacement } : item
+    ));
+  };
+
   const handleAnalyze = () => {
     const formattedDate = new Date().toLocaleDateString('en-US', {
       month: 'long',
@@ -145,11 +171,26 @@ const NewAnalysis: React.FC = () => {
         
         // Use the detected words and replacements from the backend
         if (data && data.replacements) {
-          const detectedReplacements = Object.entries(data.replacements).map(([original, replacement]) => ({
-            original,
-            replacement: replacement as string,
-            approved: false
-          }));
+          const replacementAlternatives = data.replacement_alternatives || {};
+          const detectedTermCategories = data.detected_term_categories || {};
+          const detectedReplacements = Object.entries(data.replacements).map(([original, replacement]) => {
+            const matchingKey = Object.keys(replacementAlternatives).find(
+              (key) => key.toLowerCase() === original.toLowerCase()
+            );
+            const alternatives = matchingKey && Array.isArray(replacementAlternatives[matchingKey])
+              ? replacementAlternatives[matchingKey]
+              : [];
+            const categoryKey = Object.keys(detectedTermCategories).find(
+              (key) => key.toLowerCase() === original.toLowerCase()
+            );
+            return {
+              original,
+              replacement: alternatives[0] || replacement as string,
+              alternatives: alternatives.length ? alternatives : [replacement as string],
+              category: categoryKey ? detectedTermCategories[categoryKey] : 'other',
+              approved: false,
+            };
+          });
           setReplacements(detectedReplacements);
           // Now that we have the detected replacements, show the results
           setShowResults(true);
@@ -297,8 +338,22 @@ const NewAnalysis: React.FC = () => {
                       <div key={item.original} className={`replacement-item ${item.approved ? 'approved' : ''}`}>
                         <div className="replacement-label">
                           <span className="replacement-original">{item.original}</span>
+                          <span className="term-category">{getGenderTermCategoryLabel(item.category)}</span>
                           <span className="replacement-arrow">→</span>
-                          <span className="replacement-suggestion">{item.replacement}</span>
+                          {item.alternatives.length > 1 ? (
+                            <select
+                              className="replacement-suggestion"
+                              value={item.replacement}
+                              onChange={(event) => selectAlternative(item.original, event.target.value)}
+                              aria-label={`Fair alternative for ${item.original}`}
+                            >
+                              {item.alternatives.map((alternative) => (
+                                <option key={alternative} value={alternative}>{alternative}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="replacement-suggestion">{item.replacement}</span>
+                          )}
                         </div>
                         <button
                           className={`approval-toggle ${item.approved ? 'approved' : ''}`}

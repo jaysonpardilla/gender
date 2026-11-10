@@ -195,6 +195,38 @@
   color: var(--text-secondary);
 }
 
+.term-category {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: normal;
+}
+
+select.replacement-suggestion {
+  max-width: min(220px, 100%);
+  padding: 6px 30px 6px 10px;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  background-color: #f0fdf4;
+  color: #14532d;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  color-scheme: light;
+}
+
+select.replacement-suggestion option {
+  background-color: #ffffff;
+  color: #1f2937;
+}
+
 .approval-toggle {
   display: inline-flex;
   align-items: center;

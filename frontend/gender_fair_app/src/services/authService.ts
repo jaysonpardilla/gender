@@ -8,7 +8,7 @@ export const authService = {
     last_name: string;
     password: string;
     password_confirm: string;
-    role: 'user' | 'admin';
+    role: 'student' | 'faculty' | 'admin';
   }) => api.post('/auth/signup/', data),
 
   login: (email: string, password: string) =>
@@ -115,6 +115,9 @@ export const adminService = {
   getAllUsers: () =>
     api.get('/admin/users/'),
 
+  deleteUser: (userId: number) =>
+    api.delete(`/admin/users/${userId}/`),
+
   getAllDocuments: () =>
     api.get('/admin/documents/'),
   getSupportMessages: () =>
@@ -140,7 +143,7 @@ export const adminService = {
   initDataset: () =>
     api.post('/admin/init-dataset/', {}),
 
-  addDatasetMapping: (data: { biased_word: string; fair_word: string }) =>
+  addDatasetMapping: (data: { biased_word: string; fair_words: string[]; category: string }) =>
     api.post('/admin/dataset/', data),
 
   deleteDatasetMapping: (mappingId: number) =>

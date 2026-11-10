@@ -126,53 +126,53 @@ class DocxModifier:
     
     def replace_in_paragraph(self, paragraph, original: str, replacement: str):
         """
-        Replace text in a paragraph while preserving run-level formatting.
+        Replace text across paragraph runs without merging their formatting.
         """
-        # For simple case: combine all runs, replace, then redistribute
-        full_text = ''.join([run.text for run in paragraph.runs])
-        
+        runs = paragraph.runs
+        full_text = ''.join(run.text for run in runs)
         if original.lower() not in full_text.lower():
             return
-        
-        modified_text, count = self.replacer.replace_with_case_preservation(
-            full_text, original, replacement
-        )
-        
-        if count > 0:
-            # Store formatting info for each original run
-            runs_info = []
-            for run in paragraph.runs:
-                runs_info.append({
-                    'font_name': run.font.name,
-                    'font_size': run.font.size,
-                    'bold': run.font.bold,
-                    'italic': run.font.italic,
-                    'underline': run.font.underline,
-                    'color': run.font.color.rgb if run.font.color.rgb else None,
-                })
-            
-            # Clear runs and set modified text
-            for run in paragraph.runs:
-                run.text = ''
-            
-            # Add modified text as single run (preserves overall formatting)
-            if paragraph.runs:
-                paragraph.runs[0].text = modified_text
-                # Apply first run's formatting to modified text
-                if runs_info:
-                    first_format = runs_info[0]
-                    paragraph.runs[0].font.name = first_format['font_name']
-                    paragraph.runs[0].font.size = first_format['font_size']
-                    paragraph.runs[0].font.bold = first_format['bold']
-                    paragraph.runs[0].font.italic = first_format['italic']
-                    paragraph.runs[0].font.underline = first_format['underline']
-                    if first_format['color']:
-                        paragraph.runs[0].font.color.rgb = first_format['color']
-            else:
-                # If no runs exist, add new one
-                paragraph.add_run(modified_text)
-            
-            self.analyzer.record_replacement(original, replacement, count)
+        matches = list(re.finditer(r'\b' + re.escape(original) + r'\b', full_text, flags=re.IGNORECASE))
+        if not matches:
+            return
+
+        run_offsets = []
+        offset = 0
+        for run in runs:
+            run_offsets.append((offset, offset + len(run.text)))
+            offset += len(run.text)
+
+        for match in reversed(matches):
+            start_run_index = next(
+                (index for index, (_, end) in enumerate(run_offsets) if match.start() < end),
+                None,
+            )
+            end_run_index = next(
+                (index for index, (_, end) in enumerate(run_offsets) if match.end() <= end),
+                None,
+            )
+            if start_run_index is None or end_run_index is None:
+                continue
+
+            start_offset = run_offsets[start_run_index][0]
+            end_offset = run_offsets[end_run_index][0]
+            start_in_run = match.start() - start_offset
+            end_in_run = match.end() - end_offset
+            preserved_replacement = self.replacer.preserve_case(match.group(), replacement)
+
+            if start_run_index == end_run_index:
+                run = runs[start_run_index]
+                run.text = run.text[:start_in_run] + preserved_replacement + run.text[end_in_run:]
+                continue
+
+            first_run = runs[start_run_index]
+            last_run = runs[end_run_index]
+            first_run.text = first_run.text[:start_in_run] + preserved_replacement
+            for run_index in range(start_run_index + 1, end_run_index):
+                runs[run_index].text = ''
+            last_run.text = last_run.text[end_in_run:]
+
+        self.analyzer.record_replacement(original, replacement, len(matches))
     
     def replace_in_table(self, table, original: str, replacement: str):
         """

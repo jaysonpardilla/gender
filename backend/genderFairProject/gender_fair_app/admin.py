@@ -19,7 +19,31 @@ class DocumentAdmin(admin.ModelAdmin):
 
 @admin.register(BiasedWordMapping)
 class BiasedWordMappingAdmin(admin.ModelAdmin):
-    list_display = ['biased_word', 'fair_word']
+    list_display = ['biased_word', 'fair_word', 'category']
+    list_filter = ['category']
     search_fields = ['biased_word', 'fair_word']
     ordering = ['biased_word']
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        BiasedWordMapping.objects.filter(biased_word=obj.biased_word).update(category=obj.category)
+        self.clear_dataset_cache()
+
+    def delete_model(self, request, obj):
+        super().delete_model(request, obj)
+        self.clear_dataset_cache()
+
+    def delete_queryset(self, request, queryset):
+        super().delete_queryset(request, queryset)
+        self.clear_dataset_cache()
+
+    @staticmethod
+    def clear_dataset_cache():
+        from django.core.cache import cache
+
+        for key in (
+            'gender_fair_dataset',
+            'gender_fair_dataset_alternatives',
+            'gender_fair_dataset_categories',
+        ):
+            cache.delete(key)

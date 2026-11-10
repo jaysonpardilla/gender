@@ -31,6 +31,7 @@ interface Props {
   fileName?: string;
   detectedWords?: string[];
   wordReplacements: WordReplacement[];
+  focusReplacement: WordReplacement | null;
   onModifiedPdfChange?: React.Dispatch<React.SetStateAction<Uint8Array | null>>;
   downloadEnabled?: boolean;
 }
@@ -44,6 +45,7 @@ const DocumentPreviewContent: React.FC<Props> = ({
   fileData,
   fileName = 'document',
   wordReplacements = [],
+  focusReplacement,
   onModifiedPdfChange,
   downloadEnabled = false,
 }) => {
@@ -167,7 +169,7 @@ const DocumentPreviewContent: React.FC<Props> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     
     console.log(`✅ Document downloaded: ${filename}`);
   };
@@ -191,6 +193,7 @@ const DocumentPreviewContent: React.FC<Props> = ({
       fileType={fileType}
       fileName={fileName || 'document'}
       wordReplacements={wordReplacements}
+      focusReplacement={focusReplacement}
       onSaveDocument={handleSaveDocument}
       downloadEnabled={downloadEnabled}
       isLoading={loading}

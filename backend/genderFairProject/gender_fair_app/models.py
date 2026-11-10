@@ -4,11 +4,12 @@ import json
 
 class UserProfile(models.Model):
     ROLE_CHOICES = [
-        ('user', 'User'),
+        ('student', 'Student'),
+        ('faculty', 'Faculty'),
         ('admin', 'Admin'),
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='student')
     avatar = models.CharField(max_length=255, default='default_avatar.png', help_text='Path or URL to avatar')
     bio = models.TextField(blank=True, default='')
     
@@ -44,6 +45,7 @@ class Document(models.Model):
     original_text = models.TextField()
     processed_text = models.TextField()
     detected_words = models.JSONField(default=list, blank=True)  # List of detected biased words
+    detected_term_categories = models.JSONField(default=dict, blank=True)
     approved_replacements_count = models.IntegerField(default=0)
     file_name = models.CharField(max_length=255, null=True, blank=True)
     file_type = models.CharField(max_length=10, null=True, blank=True)  # txt, docx, pdf
@@ -59,15 +61,31 @@ class Document(models.Model):
 
 class BiasedWordMapping(models.Model):
     """Cache of the gender-fair dataset"""
-    biased_word = models.CharField(max_length=255, unique=True, db_index=True)
+    CATEGORY_CHOICES = [
+        ('gendered_occupational_term', 'Gendered occupational term'),
+        ('gender_exclusive_expression', 'Gender-exclusive expression'),
+        ('gender_stereotype', 'Gender stereotype'),
+        ('gendered_pronoun', 'Gendered pronoun'),
+        ('gendered_title', 'Gendered title'),
+        ('other', 'Other'),
+    ]
+
+    biased_word = models.CharField(max_length=255, db_index=True)
     fair_word = models.CharField(max_length=255)
+    category = models.CharField(max_length=40, choices=CATEGORY_CHOICES, default='other')
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return f"{self.biased_word} → {self.fair_word}"
     
     class Meta:
-        ordering = ['biased_word']
+        ordering = ['biased_word', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['biased_word', 'fair_word'],
+                name='unique_biased_word_fair_word',
+            ),
+        ]
 
 
 class SupportMessage(models.Model):

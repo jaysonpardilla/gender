@@ -19,6 +19,7 @@ interface Props {
   originalPdfBytes: Uint8Array;
   fileName: string;
   wordReplacements: WordReplacement[];
+  focusReplacement: WordReplacement | null;
   onSavePdf?: (modifiedBytes: Uint8Array) => void;
   downloadEnabled?: boolean;
 }
@@ -34,6 +35,9 @@ const arePropsEqual = (prevProps: Props, nextProps: Props): boolean => {
   if (prevProps.originalPdfBytes !== nextProps.originalPdfBytes) return false;
   if (prevProps.fileName !== nextProps.fileName) return false;
   if (prevProps.onSavePdf !== nextProps.onSavePdf) return false;
+  if (prevProps.downloadEnabled !== nextProps.downloadEnabled) return false;
+  if (prevProps.focusReplacement?.instanceId !== nextProps.focusReplacement?.instanceId) return false;
+  if (prevProps.focusReplacement?.approved !== nextProps.focusReplacement?.approved) return false;
 
   // Only compare approved replacements, not the entire array
   const prevApproved = getApprovedReplacements(prevProps.wordReplacements);
@@ -58,6 +62,7 @@ const PdfViewerContent: React.FC<Props> = ({
   originalPdfBytes,
   fileName,
   wordReplacements,
+  focusReplacement,
   onSavePdf,
   downloadEnabled = true,
 }) => {
@@ -90,9 +95,31 @@ const PdfViewerContent: React.FC<Props> = ({
     }
   }, []);
 
-  const approvedCount = wordReplacements.filter((r) => r.approved).length;
+  const focusReplacementInTextLayer = useCallback(() => {
+    const term = focusReplacement
+      ? (focusReplacement.approved ? focusReplacement.replacement : focusReplacement.original).trim()
+      : '';
+    const textLayer = scrollContainerRef.current?.querySelector('.react-pdf__Page__textContent');
+    if (!term || !textLayer) return;
+
+    const normalizedTerm = term.toLocaleLowerCase();
+    const textSpans = Array.from(textLayer.querySelectorAll<HTMLElement>('span'));
+    const target = textSpans.find((span) => span.textContent?.trim().toLocaleLowerCase() === normalizedTerm)
+      || textSpans.find((span) => span.textContent?.toLocaleLowerCase().includes(normalizedTerm));
+
+    if (target) {
+      target.style.backgroundColor = 'rgba(74, 222, 128, 0.35)';
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+  }, [focusReplacement]);
+
+  const handleTextLayerRendered = useCallback(() => {
+    requestAnimationFrame(focusReplacementInTextLayer);
+  }, [focusReplacementInTextLayer]);
 
   useEffect(() => {
+    let isCurrentUpdate = true;
+
     const updatePdf = async () => {
       try {
         // Preserve scroll position and show subtle modifying state
@@ -103,19 +130,23 @@ const PdfViewerContent: React.FC<Props> = ({
         const approvedReplacements = wordReplacements.filter((r) => r.approved);
 
         if (approvedReplacements.length === 0) {
-          setModifiedPdfBytes(originalPdfBytes);
-          setLoading(false);
-          setIsModifying(false);
-          restoreScrollPosition();
+          if (isCurrentUpdate) {
+            setModifiedPdfBytes(originalPdfBytes);
+            setLoading(false);
+            setIsModifying(false);
+            restoreScrollPosition();
+          }
           return;
         }
 
         const modified = await modifyPdfWithReplacements(originalPdfBytes, approvedReplacements);
+        if (!isCurrentUpdate) return;
         setModifiedPdfBytes(modified);
         setLoading(false);
         setIsModifying(false);
         restoreScrollPosition();
       } catch (err) {
+        if (!isCurrentUpdate) return;
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.error('Error modifying PDF:', err);
         setError(`Failed to modify PDF: ${errorMsg}`);
@@ -127,6 +158,10 @@ const PdfViewerContent: React.FC<Props> = ({
     };
 
     updatePdf();
+
+    return () => {
+      isCurrentUpdate = false;
+    };
   }, [wordReplacements, originalPdfBytes, saveScrollPosition, restoreScrollPosition]);
 
   // Create Blob URL from modified PDF bytes to avoid ArrayBuffer detachment
@@ -180,6 +215,7 @@ const PdfViewerContent: React.FC<Props> = ({
     if (!downloadEnabled) return;
     if (modifiedPdfBytes && onSavePdf) {
       onSavePdf(modifiedPdfBytes);
+      return;
     }
 
     if (modifiedPdfBytes) {
@@ -195,7 +231,7 @@ const PdfViewerContent: React.FC<Props> = ({
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
   }, [modifiedPdfBytes, onSavePdf, fileName, downloadEnabled]);
 
@@ -272,13 +308,17 @@ const PdfViewerContent: React.FC<Props> = ({
         {/* Inline-block wrapper keeps the PDF centered even if its width changes */}
         <div className="bg-white shadow-lg inline-block mx-auto">
           <Document
-            key={`${approvedCount}-${pdfBlobUrl || 'loading'}`}
+            key={pdfBlobUrl || 'loading'}
             file={pdfBlobUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={<div className="p-4 text-gray-500">Loading PDF...</div>}
           >
-            <Page pageNumber={currentPage} renderMode="canvas" />
+            <Page
+              pageNumber={currentPage}
+              renderMode="canvas"
+              onRenderTextLayerSuccess={handleTextLayerRendered}
+            />
           </Document>
         </div>
       </div>

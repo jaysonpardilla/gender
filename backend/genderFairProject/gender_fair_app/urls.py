@@ -30,6 +30,7 @@ urlpatterns = [
     
     # Admin endpoints
     path('admin/users/', views.admin_all_users_view, name='admin-users'),
+    path('admin/users/<int:user_id>/', views.admin_user_view, name='admin-user'),
     path('admin/documents/', views.admin_all_documents_view, name='admin-documents'),
     path('admin/analytics/', views.admin_analytics_view, name='admin-analytics'),
     path('admin/support-messages/', views.admin_support_messages_view, name='admin-support-messages'),

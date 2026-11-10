@@ -14,6 +14,7 @@ interface Props {
   fileType: string;
   fileName: string;
   wordReplacements: WordReplacement[];
+  focusReplacement: WordReplacement | null;
   onSaveDocument?: (modifiedBytes: Uint8Array) => void;
   isLoading?: boolean;
   downloadEnabled?: boolean;
@@ -28,6 +29,7 @@ const DocumentViewerContent: React.FC<Props> = ({
   fileType,
   fileName,
   wordReplacements,
+  focusReplacement,
   onSaveDocument,
   isLoading = false,
   downloadEnabled = false,
@@ -66,6 +68,7 @@ const DocumentViewerContent: React.FC<Props> = ({
         originalPdfBytes={documentBytes}
         fileName={fileName}
         wordReplacements={wordReplacements}
+        focusReplacement={focusReplacement}
         onSavePdf={onSaveDocument}
         downloadEnabled={downloadEnabled}
       />
@@ -79,9 +82,7 @@ const DocumentViewerContent: React.FC<Props> = ({
         docxBytes={documentBytes}
         fileName={fileName}
         wordReplacements={wordReplacements}
-        onReflow={(pageCount) => {
-          console.log(`📊 Document reflowed: ${pageCount} pages`);
-        }}
+        focusReplacement={focusReplacement}
         downloadEnabled={downloadEnabled}
       />
     );

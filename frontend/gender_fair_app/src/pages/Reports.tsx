@@ -6,12 +6,16 @@ import Sidebar from '../components/Sidebar';
 import { analysisService } from '../services/authService';
 import * as XLSX from 'xlsx';
 import { Download } from 'lucide-react';
+import { GENDER_TERM_CATEGORIES, getGenderTermCategoryLabel } from '../utils/genderTermCategories';
 import '../styles/Reports.css';
 
 interface AnalysisRow {
   id: number;
   file_name: string;
   file_type: string;
+  detected_words: string[];
+  detected_term_categories: Record<string, string>;
+  approved_replacements_count: number;
   biased_words_found: number;
   fairness_score: number;
   created_at: string;
@@ -20,7 +24,6 @@ interface AnalysisRow {
 interface BiasWord {
   word: string;
   count: number;
-  replacement: string;
 }
 
 type ChartData = {
@@ -51,6 +54,26 @@ const getLocalWeekKey = (value: string | Date) => {
   const { year, month, day } = getLocalDateParts(value);
   const week = Math.ceil(day / 7);
   return `${year}-${String(month).padStart(2, '0')}-W${week}`;
+};
+
+const summarizeCategories = (rows: AnalysisRow[]) => {
+  const counts = new Map<string, number>(
+    GENDER_TERM_CATEGORIES.map(({ value }) => [value, 0])
+  );
+  rows.forEach((row) => {
+    row.detected_words.forEach((word) => {
+      const requestedCategory = row.detected_term_categories[word.toLowerCase()];
+      const category = counts.has(requestedCategory) ? requestedCategory : 'other';
+      counts.set(category, (counts.get(category) || 0) + 1);
+    });
+  });
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return GENDER_TERM_CATEGORIES.map(({ value, label }) => ({
+    value,
+    label,
+    count: counts.get(value) || 0,
+    percentage: total ? Math.round((counts.get(value) || 0) * 1000 / total) / 10 : 0,
+  })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 };
 
 const LineChartSVG: FC<{ data: ChartData }> = ({ data }) => {
@@ -150,14 +173,27 @@ export default function Reports() {
           const detected = Array.isArray(row.detected_words)
             ? row.detected_words
             : typeof row.detected_words === 'string'
-            ? JSON.parse(row.detected_words)
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(row.detected_words as string);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
             : [];
           const biasedCount = Array.isArray(detected) ? detected.length : 0;
           const fairness = biasedCount ? Math.max(0, 100 - biasedCount * 5) : 100;
+          const categoryValue = row.detected_term_categories;
           return {
             id: Number(row.id) || 0,
             file_name: String(row.file_name || 'Text Input'),
             file_type: String(row.file_type || 'text').toLowerCase(),
+            detected_words: detected.map((word) => String(word)),
+            detected_term_categories: categoryValue && typeof categoryValue === 'object'
+              ? categoryValue as Record<string, string>
+              : {},
+            approved_replacements_count: Number(row.approved_replacements_count) || 0,
             biased_words_found: biasedCount,
             fairness_score: fairness,
             created_at: String(row.created_at || new Date().toISOString()),
@@ -224,6 +260,11 @@ export default function Reports() {
       'File Name': row.file_name,
       'File Type': row.file_type.toUpperCase(),
       'Biased Words Found': row.biased_words_found,
+      'Detected Terms': row.detected_words.join(', '),
+      'Detected Categories': [...new Set(row.detected_words.map((word) =>
+        getGenderTermCategoryLabel(row.detected_term_categories[word.toLowerCase()])
+      ))].join(', '),
+      'Approved Replacements': row.approved_replacements_count,
       'Fairness Score': `${row.fairness_score}%`,
       'Created At': new Date(row.created_at).toLocaleString(),
     }));
@@ -236,6 +277,12 @@ export default function Reports() {
     const worksheet = XLSX.utils.json_to_sheet(sheetData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Report Data');
+    const categorySheet = XLSX.utils.json_to_sheet(summarizeCategories(downloadRows).map((item) => ({
+      Category: item.label,
+      'Detected Terms': item.count,
+      'Share of Detected Terms': `${item.percentage}%`,
+    })));
+    XLSX.utils.book_append_sheet(workbook, categorySheet, 'Category Breakdown');
     const fileWeekSuffix = downloadWeek === 'All' ? 'all-weeks' : downloadWeek.toLowerCase();
     XLSX.writeFile(workbook, `gender_fair_report_${downloadMonth}_${fileWeekSuffix}.xlsx`);
   };
@@ -244,7 +291,7 @@ export default function Reports() {
   const summary = useMemo(() => {
     const totalDocuments = filteredRows.length;
     const totalBiasWords = filteredRows.reduce((sum, row) => sum + row.biased_words_found, 0);
-    const totalReplacements = Math.round(totalBiasWords * 1.2);
+    const totalReplacements = filteredRows.reduce((sum, row) => sum + row.approved_replacements_count, 0);
     const averageFairness = totalDocuments ? Math.round(filteredRows.reduce((sum, row) => sum + row.fairness_score, 0) / totalDocuments) : 0;
     return { totalDocuments, totalBiasWords, totalReplacements, averageFairness };
   }, [filteredRows]);
@@ -252,30 +299,19 @@ export default function Reports() {
   const groupedWords = useMemo(() => {
     const words: Record<string, BiasWord> = {};
     filteredRows.forEach((row) => {
-      // Extract actual detected words from row
-      if (row.biased_words_found > 0) {
-        // Generate placeholder words based on count for now
-        // In a real scenario, you'd parse actual detected_words from the API
-        const placeholderWords = ['chairman', 'businessman', 'stewardess', 'actress', 'waitress'];
-        placeholderWords.forEach((word) => {
-          if (!words[word]) {
-            words[word] = { 
-              word, 
-              count: 0, 
-              replacement: word === 'chairman' ? 'chairperson' 
-                : word === 'businessman' ? 'businessperson'
-                : word === 'stewardess' ? 'flight attendant'
-                : word === 'actress' ? 'actor'
-                : 'server'
-            };
-          }
-          words[word].count += Math.ceil(row.biased_words_found / placeholderWords.length);
-        });
-      }
+      row.detected_words.forEach((word) => {
+        const key = word.toLowerCase();
+        if (!words[key]) {
+          words[key] = { word, count: 0 };
+        }
+        words[key].count += 1;
+      });
     });
     const sorted = Object.values(words).sort((a, b) => b.count - a.count);
     return sorted.slice(0, 5);
   }, [filteredRows]);
+
+  const categorySummary = useMemo(() => summarizeCategories(filteredRows), [filteredRows]);
 
   const bestDocuments = useMemo(
     () => [...filteredRows].sort((a, b) => b.fairness_score - a.fairness_score).slice(0, 5),
@@ -336,6 +372,8 @@ export default function Reports() {
 
     return result;
   }, [filteredRows, performanceView]);
+
+  const topCategory = categorySummary.find((item) => item.count > 0) || null;
 
   // Pie chart removed per request
 
@@ -483,10 +521,10 @@ export default function Reports() {
                       </div>
                       <div className="insight-row">
                         <div>
-                          <span>Most Used Replacement</span>
-                          <strong>{top ? top.replacement : '—'}</strong>
+                          <span>Most Frequent Category</span>
+                          <strong>{topCategory?.label || '—'}</strong>
                         </div>
-                        <span>{top ? `${top.count}x` : '—'}</span>
+                        <span>{topCategory ? `${topCategory.count}x` : '—'}</span>
                       </div>
                     </>
                   );
@@ -520,6 +558,43 @@ export default function Reports() {
               </div>
             </aside>
           </div>
+
+          <section className="category-analytics-card">
+            <div className="category-analytics-header">
+              <div>
+                <p>Term Classification</p>
+                <h2>Detected Terms by Category</h2>
+                <span>Based on saved analyses for {new Date(`${selectedMonth}-01`).toLocaleString('default', { month: 'long', year: 'numeric' })}.</span>
+              </div>
+              <div className="category-total">
+                <span>Total detected terms</span>
+                <strong>{summary.totalBiasWords}</strong>
+              </div>
+            </div>
+            <div className="category-breakdown">
+              {categorySummary.map((item) => (
+                <div className="category-breakdown-row" key={item.value}>
+                  <div className="category-breakdown-label">
+                    <span>{item.label}</span>
+                    <strong>{item.count} <small>({item.percentage}%)</small></strong>
+                  </div>
+                  <div
+                    className="category-breakdown-track"
+                    role="progressbar"
+                    aria-label={`${item.label}: ${item.count} detected terms`}
+                    aria-valuemin={0}
+                    aria-valuemax={Math.max(1, summary.totalBiasWords)}
+                    aria-valuenow={item.count}
+                  >
+                    <div className="category-breakdown-fill" style={{ width: `${item.percentage}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="category-analytics-note">
+              Categories describe detected terms only. They are not document-level gender-responsiveness assessments.
+            </p>
+          </section>
 
           <div className="summary-row">
             <div className="report-block docs-block">

@@ -33,7 +33,7 @@ export default function Signup() {
     email: '',
     password: '',
     password_confirm: '',
-    role: 'user' as 'user' | 'admin',
+    role: 'student' as 'student' | 'faculty' | 'admin',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -252,7 +252,8 @@ export default function Signup() {
                   onChange={handleChange}
                   className="w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/20"
                 >
-                  <option value="user">User</option>
+                  <option value="student">Student</option>
+                  <option value="faculty">Faculty</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>

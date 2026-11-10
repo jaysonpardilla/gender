@@ -19,7 +19,7 @@ from .serializers import (
     DocumentSerializer, TextAnalysisSerializer, BiasedWordMappingSerializer,
     UserProfileSerializer, SupportMessageSerializer
 )
-from .utils import analyze_text, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow, append_mappings_to_excel_file, resolve_dataset_path
+from .utils import analyze_text, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow, append_mappings_to_excel_file, resolve_dataset_path, get_dataset_categories
 from .docx_handler import modify_docx_with_replacements
 from django.views.decorators.http import require_http_methods
 import json
@@ -73,6 +73,7 @@ def normalize_detected_words(detected_words):
 class SignupView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = SignupSerializer
+    authentication_classes = []
     permission_classes = [AllowAny]
     
     def create(self, request, *args, **kwargs):
@@ -298,6 +299,7 @@ def analyze_text_view(request):
         original_text=result['original_text'],
         processed_text=result['processed_text'],
         detected_words=result['detected_words'],
+        detected_term_categories=result['detected_term_categories'],
         approved_replacements_count=0,
         file_type='text'
     )
@@ -311,6 +313,8 @@ def analyze_text_view(request):
         'processed_text': result['processed_text'],
         'detected_words': result['detected_words'],
         'replacements': result['replacements'],
+        'replacement_alternatives': result['replacement_alternatives'],
+        'detected_term_categories': result['detected_term_categories'],
         'created_at': document.created_at
     }, status=status.HTTP_200_OK)
 
@@ -375,6 +379,7 @@ def upload_document_view(request):
             original_text=result['original_text'],
             processed_text=result['processed_text'],
             detected_words=result['detected_words'],
+            detected_term_categories=result['detected_term_categories'],
             approved_replacements_count=approved_replacements_count,
             file_name=file.name,
             file_type=file_type
@@ -391,6 +396,8 @@ def upload_document_view(request):
             'processed_text': result['processed_text'],
             'detected_words': result['detected_words'],
             'replacements': result['replacements'],
+            'replacement_alternatives': result['replacement_alternatives'],
+            'detected_term_categories': result['detected_term_categories'],
             'file_data': file_data_base64,
             'created_at': document.created_at
         }, status=status.HTTP_200_OK)
@@ -983,6 +990,36 @@ def admin_all_users_view(request):
     return Response(data)
 
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_user_view(request, user_id: int):
+    """Admin: Delete a user and their associated records."""
+    admin = request.user
+
+    if not hasattr(admin, 'profile') or admin.profile.role != 'admin':
+        logger.warning(f"❌ DELETE USER FAILED | User: {admin} | Reason: Admin access required")
+        return Response(
+            {'error': 'Admin access required'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if admin.id == user_id:
+        return Response(
+            {'error': 'You cannot delete your own account.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        target_user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    target_email = target_user.email
+    target_user.delete()
+    logger.info(f"✅ DELETE USER SUCCESS | Admin: {admin} | Deleted user: {target_email}")
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_all_documents_view(request):
@@ -1123,33 +1160,38 @@ def admin_analytics_view(request):
         type_counts[file_type] = type_counts.get(file_type, 0) + 1
     document_type_breakdown = [{'type': key.upper(), 'count': value} for key, value in type_counts.items()]
 
-    # Basic bias category grouping for visualization
-    categories = {
-        'Occupational': 0,
-        'Pronouns': 0,
-        'Titles': 0,
-        'Generic Terms': 0,
-        'Other': 0,
-    }
-    pronouns = {'he', 'she', 'him', 'her', 'his', 'hers', 'they', 'them', 'their', 'theirs', 'themself', 'himself'}
-    titles = {'mr', 'mrs', 'miss', 'ms', 'mx', 'sir', 'madam', 'lord', 'lady', 'dr', 'professor', 'captain', 'judge'}
-    generic = {'man', 'woman', 'people', 'person', 'child', 'children', 'adult', 'guy', 'lady', 'citizen'}
-    occupations = {'engineer', 'manager', 'doctor', 'nurse', 'teacher', 'driver', 'waiter', 'waitress', 'police', 'fireman', 'firefighter', 'soldier', 'pilot', 'chef', 'lawyer'}
+    category_labels = dict(BiasedWordMapping.CATEGORY_CHOICES)
+    category_counts = {key: 0 for key in category_labels}
+    current_category_by_word = get_dataset_categories()
+    for doc in documents:
+        stored_categories = doc.detected_term_categories if isinstance(doc.detected_term_categories, dict) else {}
+        normalized_categories = {
+            str(word).lower(): category for word, category in stored_categories.items()
+        }
+        for word in normalize_detected_words(doc.detected_words):
+            category = normalized_categories.get(
+                word.lower(),
+                current_category_by_word.get(word.lower(), 'other'),
+            )
+            if category not in category_counts:
+                category = 'other'
+            category_counts[category] += 1
 
-    for word in word_counts.keys():
-        lower_word = word.lower()
-        if any(token in lower_word for token in occupations):
-            categories['Occupational'] += word_counts[word]
-        elif lower_word in pronouns:
-            categories['Pronouns'] += word_counts[word]
-        elif lower_word in titles:
-            categories['Titles'] += word_counts[word]
-        elif lower_word in generic:
-            categories['Generic Terms'] += word_counts[word]
-        else:
-            categories['Other'] += word_counts[word]
-
-    bias_categories_distribution = [{'category': key, 'count': value} for key, value in categories.items()]
+    categorized_term_total = sum(category_counts.values())
+    bias_categories_distribution = [
+        {
+            'category_key': key,
+            'category': label,
+            'count': category_counts[key],
+            'percentage': round(category_counts[key] * 100 / categorized_term_total, 1)
+            if categorized_term_total else 0,
+        }
+        for key, label in category_labels.items()
+    ]
+    most_frequently_detected_categories = sorted(
+        (item for item in bias_categories_distribution if item['count'] > 0),
+        key=lambda item: (-item['count'], item['category']),
+    )[:3]
 
     # Support summary
     support_messages = SupportMessage.objects.all()
@@ -1162,6 +1204,7 @@ def admin_analytics_view(request):
         'total_documents': total_documents,
         'total_users': total_users,
         'total_biased_words_detected': len(all_detected),
+        'total_detected_terms': len(all_detected),
         'total_analyses': total_documents,
         'average_fairness_score': int(
             sum(
@@ -1176,6 +1219,7 @@ def admin_analytics_view(request):
         'fairness_score_trend': fairness_score_trend,
         'document_type_breakdown': document_type_breakdown,
         'bias_categories_distribution': bias_categories_distribution,
+        'most_frequently_detected_categories': most_frequently_detected_categories,
         'most_common_biased_words': most_common,
         'support_summary': {
             'total_messages': total_support,
@@ -1203,24 +1247,82 @@ def admin_dataset_view(request):
     # POST: add new mapping
     if request.method == 'POST':
         biased_word = (request.data.get('biased_word') or request.data.get('gendered_term') or '').strip().lower()
+        category = request.data.get('category')
+        if category is None:
+            category = BiasedWordMapping.objects.filter(
+                biased_word=biased_word
+            ).values_list('category', flat=True).first() or 'other'
+        valid_categories = dict(BiasedWordMapping.CATEGORY_CHOICES)
+        if category not in valid_categories:
+            return Response(
+                {'error': f"Invalid category. Choose one of: {', '.join(valid_categories)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fair_words = request.data.get('fair_words')
+        if fair_words is not None:
+            if not isinstance(fair_words, list):
+                return Response({'error': 'fair_words must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not biased_word or not fair_words or any(not isinstance(word, str) or not word.strip() for word in fair_words):
+                return Response(
+                    {'error': 'A biased_word and at least one non-empty fair alternative are required.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                from django.core.cache import cache
+                from .utils import append_mapping_to_excel
+
+                mappings = []
+                for value in fair_words:
+                    fair_word = value.strip()
+                    obj, created = BiasedWordMapping.objects.get_or_create(
+                        biased_word=biased_word,
+                        fair_word=fair_word,
+                        defaults={'category': category},
+                    )
+                    obj.category = category
+                    obj.save(update_fields=['category'])
+                    mapping_data = BiasedWordMappingSerializer(obj).data
+                    mapping_data['is_duplicate'] = not created
+                    mappings.append(mapping_data)
+                    if created:
+                        append_mapping_to_excel(biased_word, fair_word)
+
+                BiasedWordMapping.objects.filter(biased_word=biased_word).update(category=category)
+                cache.delete('gender_fair_dataset')
+                cache.delete('gender_fair_dataset_alternatives')
+                cache.delete('gender_fair_dataset_categories')
+                created_any = any(not mapping['is_duplicate'] for mapping in mappings)
+                return Response(
+                    {'mappings': mappings},
+                    status=status.HTTP_201_CREATED if created_any else status.HTTP_200_OK,
+                )
+            except Exception as e:
+                logger.error(f"❌ ADD MAPPINGS ERROR | Admin: {user} | Error: {e}")
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         fair_word = (request.data.get('fair_word') or request.data.get('gender_fair_term') or '').strip()
         if not biased_word or not fair_word:
             logger.warning(f"❌ ADD MAPPING FAILED | Admin: {user} | Missing fields")
             return Response({'error': 'Both biased_word and fair_word are required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            obj, created = BiasedWordMapping.objects.update_or_create(biased_word=biased_word, defaults={'fair_word': fair_word})
+            obj, created = BiasedWordMapping.objects.get_or_create(
+                biased_word=biased_word,
+                fair_word=fair_word,
+                defaults={'category': category},
+            )
+            BiasedWordMapping.objects.filter(biased_word=biased_word).update(category=category)
+            obj.refresh_from_db()
             
             status_msg = "CREATED"
             if not created:
                 status_msg = "ALREADY_EXISTS"
-                if obj.fair_word != fair_word:
-                    obj.fair_word = fair_word
-                    obj.save()
-                    status_msg = "UPDATED"
             
             try:
                 from django.core.cache import cache
                 cache.delete('gender_fair_dataset')
+                cache.delete('gender_fair_dataset_alternatives')
+                cache.delete('gender_fair_dataset_categories')
             except Exception:
                 pass
             from .utils import append_mapping_to_excel
@@ -1257,7 +1359,8 @@ def admin_dataset_view(request):
         {
             'id': m['id'] if m.get('id') is not None else idx + 1,
             'biased_word': m['biased_word'],
-            'fair_word': m['fair_word']
+            'fair_word': m['fair_word'],
+            'category': m.get('category', 'other'),
         }
         for idx, m in enumerate(filtered)
     ]
@@ -1282,6 +1385,8 @@ def admin_dataset_mapping_view(request, mapping_id):
     try:
         from django.core.cache import cache
         cache.delete('gender_fair_dataset')
+        cache.delete('gender_fair_dataset_alternatives')
+        cache.delete('gender_fair_dataset_categories')
     except Exception:
         pass
 
@@ -1330,8 +1435,8 @@ def admin_dataset_import_view(request):
         
         extracted_mappings = _extract_mappings_from_excel_file(uploaded_file)
         logger.info(f"🔍 STEP 2: Extraction result - Found {len(extracted_mappings)} mappings")
-        for idx, (biased, fair) in enumerate(extracted_mappings):
-            logger.info(f"   [{idx+1}] '{biased}' → '{fair}'")
+        for idx, (biased, fair, category) in enumerate(extracted_mappings):
+            logger.info(f"   [{idx+1}] '{biased}' → '{fair}' | category='{category or 'other'}'")
         
         uploaded_file.seek(0)
         logger.info(f"🔍 STEP 3: Before append_mappings_to_excel_file - Position: {uploaded_file.tell()}")
@@ -1432,4 +1537,3 @@ def bias_mappings_view(request):
     except Exception as e:
         logger.error(f"❌ BIAS MAPPINGS ERROR: {e}")
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

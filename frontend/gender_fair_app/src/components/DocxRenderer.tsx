@@ -3,7 +3,7 @@
  * Displays DOCX files as paginated preview with actual page dimensions, headers, and footers
  */
 
-import React, { useEffect, useRef, useState, memo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
 import { renderAsync } from 'docx-preview';
 import {
   type PageSettings,
@@ -26,7 +26,7 @@ interface DocxRendererProps {
   docxBytes: Uint8Array;
   fileName: string;
   wordReplacements?: WordReplacement[];
-  onReflow?: (newPageCount: number) => void;
+  focusReplacement: WordReplacement | null;
   downloadEnabled?: boolean;
 }
 
@@ -116,6 +116,7 @@ function parseDocxTypographyStyles(mainDocument: string): DocxTypographyStyle {
 interface DocxPageDisplayProps {
   currentPage: RenderedPage | null;
   wordReplacements: WordReplacement[];
+  focusReplacement: WordReplacement | null;
   highlightWordsPerOccurrence: (container: HTMLElement, wordReplacements: WordReplacement[]) => void;
 }
 
@@ -242,7 +243,7 @@ const removeBlackArtifacts = (root: HTMLElement) => {
 };
 
 // Memoized page display component - only updates when currentPage or highlighting changes
-const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplacements, highlightWordsPerOccurrence }) => {
+const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence }) => {
   const pageContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -263,9 +264,24 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
       const docxSection = cloned.querySelector('section.docx') as HTMLElement | null;
       if (docxSection) {
         highlightWordsPerOccurrence(docxSection, wordReplacements);
+
+        const focusTerm = focusReplacement
+          ? (focusReplacement.approved ? focusReplacement.replacement : focusReplacement.original).trim().toLocaleLowerCase()
+          : '';
+        if (focusTerm) {
+          const highlightType = focusReplacement?.approved ? 'replacement' : 'original';
+          const target = Array.from(docxSection.querySelectorAll<HTMLElement>('.bias-word-highlight')).find(
+            (highlight) =>
+              highlight.getAttribute('data-highlight-type') === highlightType &&
+              highlight.textContent?.trim().toLocaleLowerCase() === focusTerm,
+          );
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+          }
+        }
       }
     }
-  }, [currentPage, wordReplacements, highlightWordsPerOccurrence]);
+  }, [currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence]);
 
   return (
     <div
@@ -276,6 +292,8 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
 }, (prevProps, nextProps) => {
   // Custom comparison - only re-render if currentPage changes or approved replacements change
   if (prevProps.currentPage !== nextProps.currentPage) return false;
+  if (prevProps.focusReplacement?.instanceId !== nextProps.focusReplacement?.instanceId) return false;
+  if (prevProps.focusReplacement?.approved !== nextProps.focusReplacement?.approved) return false;
   
   const prevApproved = prevProps.wordReplacements.filter(r => r.approved);
   const nextApproved = nextProps.wordReplacements.filter(r => r.approved);
@@ -305,7 +323,9 @@ const areDocxPropsEqual = (prevProps: DocxRendererProps, nextProps: DocxRenderer
   // Always re-render if docxBytes or fileName changes
   if (prevProps.docxBytes !== nextProps.docxBytes) return false;
   if (prevProps.fileName !== nextProps.fileName) return false;
-  if (prevProps.onReflow !== nextProps.onReflow) return false;
+  if (prevProps.downloadEnabled !== nextProps.downloadEnabled) return false;
+  if (prevProps.focusReplacement?.instanceId !== nextProps.focusReplacement?.instanceId) return false;
+  if (prevProps.focusReplacement?.approved !== nextProps.focusReplacement?.approved) return false;
 
   // Only compare approved replacements, not the entire array
   const prevApproved = getApprovedReplacements(prevProps.wordReplacements || []);
@@ -384,7 +404,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   docxBytes,
   fileName,
   wordReplacements = [],
-  onReflow,
+  focusReplacement,
   downloadEnabled = false,
 }) => {
   const [pages, setPages] = useState<RenderedPage[]>([]);
@@ -393,6 +413,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [activeDocxBytes, setActiveDocxBytes] = useState<Uint8Array>(docxBytes);
   const offscreenContainerRef = useRef<HTMLDivElement | null>(null);
+  const renderVersionRef = useRef(0);
 
   // Helper: Remove all highlights from a container
   const removeAllHighlights = useCallback((container: HTMLElement) => {
@@ -551,10 +572,14 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   }, []);
 
   useEffect(() => {
+    let isCurrentUpdate = true;
+
     const applyApprovedReplacements = async () => {
       const approvedReplacements = wordReplacements.filter((r) => r.approved);
       if (approvedReplacements.length === 0) {
         setActiveDocxBytes(docxBytes);
+        setError(null);
+        setLoading(false);
         return;
       }
 
@@ -562,22 +587,57 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
       setError(null);
       try {
         const modifiedBytes = await modifyDocxWithReplacements(docxBytes, approvedReplacements);
-        setActiveDocxBytes(modifiedBytes);
-        setCurrentPageIndex(0);
+        if (isCurrentUpdate) {
+          setActiveDocxBytes(modifiedBytes);
+        }
       } catch (err) {
+        if (!isCurrentUpdate) return;
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.error('❌ DOCX auto-update failed:', err);
         setError(`Failed to update DOCX preview: ${errorMsg}`);
       } finally {
-        setLoading(false);
+        if (isCurrentUpdate) {
+          setLoading(false);
+        }
       }
     };
 
     applyApprovedReplacements();
+
+    return () => {
+      isCurrentUpdate = false;
+    };
   }, [wordReplacements, docxBytes]);
+
+  const focusedPageIndex = useMemo(() => {
+    if (pages.length === 0) return currentPageIndex;
+    const selectedPageIndex = Math.min(currentPageIndex, pages.length - 1);
+    if (!focusReplacement) return selectedPageIndex;
+    const focusTerm = (
+      focusReplacement.approved ? focusReplacement.replacement : focusReplacement.original
+    ).trim().toLocaleLowerCase();
+    if (!focusTerm) return selectedPageIndex;
+    const currentPageText = pages[selectedPageIndex]?.element.textContent?.toLocaleLowerCase() || '';
+    if (currentPageText.includes(focusTerm)) return selectedPageIndex;
+
+    const matchingPages = pages
+      .map((page, index) => ({ index, text: page.element.textContent?.toLocaleLowerCase() || '' }))
+      .filter(({ text }) => text.includes(focusTerm))
+      .map(({ index }) => index);
+    return matchingPages.reduce(
+      (nearest, candidateIndex) =>
+        Math.abs(candidateIndex - selectedPageIndex) < Math.abs(nearest - selectedPageIndex)
+          ? candidateIndex
+          : nearest,
+      selectedPageIndex,
+    );
+  }, [pages, currentPageIndex, focusReplacement]);
 
   // Extract and render DOCX
   useEffect(() => {
+    const renderVersion = ++renderVersionRef.current;
+    let renderContainer: HTMLDivElement | null = null;
+
     const renderDocx = async (bytes: Uint8Array) => {
       setLoading(true);
       setError(null);
@@ -585,6 +645,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
       try {
         console.log('🔍 Extracting DOCX structure...');
         const structure = await extractDocxStructure(bytes);
+        if (renderVersion !== renderVersionRef.current) return;
 
         // Generate debug report and log it
         const report = generateDocxDebugReport(structure);
@@ -602,12 +663,13 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
         const typography = parseDocxTypographyStyles(structure.mainDocument);
 
         // Create offscreen container attached to the DOM so layout can be measured correctly
-        if (offscreenContainerRef.current) {
+        if (offscreenContainerRef.current && document.body.contains(offscreenContainerRef.current)) {
           document.body.removeChild(offscreenContainerRef.current);
           offscreenContainerRef.current = null;
         }
 
         const container = document.createElement('div');
+        renderContainer = container;
         container.style.position = 'absolute';
         container.style.top = '-9999px';
         container.style.left = '-9999px';
@@ -635,6 +697,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
         } finally {
           // Ensure we still compute layout even if renderAsync throws.
         }
+        if (renderVersion !== renderVersionRef.current) return;
 
         console.log('✅ Document rendered');
 
@@ -763,32 +826,50 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
           }
         }
 
-        if (offscreenContainerRef.current) {
-          document.body.removeChild(offscreenContainerRef.current);
+        if (renderContainer && document.body.contains(renderContainer)) {
+          document.body.removeChild(renderContainer);
+        }
+        if (offscreenContainerRef.current === renderContainer) {
           offscreenContainerRef.current = null;
         }
 
+        if (renderVersion !== renderVersionRef.current) return;
+
         setPages(renderedPages);
-        setCurrentPageIndex(0);
-        onReflow?.(renderedPages.length);
+        setCurrentPageIndex((current) => Math.min(current, Math.max(0, renderedPages.length - 1)));
         console.log(`✅ Created ${renderedPages.length} pages`);
       } catch (err) {
+        if (renderVersion !== renderVersionRef.current) return;
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.error('❌ Error rendering DOCX:', err);
         setError(`Failed to render document: ${errorMsg}`);
       } finally {
-        if (offscreenContainerRef.current) {
-          if (document.body.contains(offscreenContainerRef.current)) {
-            document.body.removeChild(offscreenContainerRef.current);
-          }
+        if (renderContainer && document.body.contains(renderContainer)) {
+          document.body.removeChild(renderContainer);
+        }
+        if (offscreenContainerRef.current === renderContainer) {
           offscreenContainerRef.current = null;
         }
-        setLoading(false);
+        if (renderVersion === renderVersionRef.current) {
+          setLoading(false);
+        }
       }
     };
 
     renderDocx(activeDocxBytes);
-  }, [activeDocxBytes, onReflow]);
+
+    return () => {
+      if (renderVersionRef.current === renderVersion) {
+        renderVersionRef.current += 1;
+      }
+      if (renderContainer && document.body.contains(renderContainer)) {
+        document.body.removeChild(renderContainer);
+      }
+      if (offscreenContainerRef.current === renderContainer) {
+        offscreenContainerRef.current = null;
+      }
+    };
+  }, [activeDocxBytes]);
 
   if (loading) {
     return (
@@ -818,7 +899,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
     );
   }
 
-  const currentPage = pages[currentPageIndex];
+  const currentPage = pages[focusedPageIndex];
 
   return (
     <div className="h-full flex flex-col docx-viewer">
@@ -828,6 +909,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
           <DocxPageDisplay
             currentPage={currentPage}
             wordReplacements={wordReplacements}
+            focusReplacement={focusReplacement}
             highlightWordsPerOccurrence={memoizedHighlight}
           />
         )}
@@ -837,15 +919,15 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
       <div className="bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex gap-2">
           <button
-            onClick={() => setCurrentPageIndex(Math.max(0, currentPageIndex - 1))}
-            disabled={currentPageIndex === 0}
+            onClick={() => setCurrentPageIndex(Math.max(0, focusedPageIndex - 1))}
+            disabled={focusedPageIndex === 0}
             className="px-3 py-1 bg-blue-500 text-white rounded disabled:bg-gray-300 hover:bg-blue-600"
           >
             ← Prev
           </button>
           <button
-            onClick={() => setCurrentPageIndex(Math.min(pages.length - 1, currentPageIndex + 1))}
-            disabled={currentPageIndex === pages.length - 1}
+            onClick={() => setCurrentPageIndex(Math.min(pages.length - 1, focusedPageIndex + 1))}
+            disabled={focusedPageIndex === pages.length - 1}
             className="px-3 py-1 bg-blue-500 text-white rounded disabled:bg-gray-300 hover:bg-blue-600"
           >
             Next →
@@ -871,7 +953,7 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);
-              URL.revokeObjectURL(link.href);
+              window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
             }}
             disabled={!downloadEnabled}
             className={`px-3 py-1 ${downloadEnabled ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-200 text-gray-500 cursor-not-allowed'} rounded`}

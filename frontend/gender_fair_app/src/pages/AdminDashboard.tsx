@@ -3,9 +3,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useMemo, Fragment, useRef, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Settings, Users, TrendingUp, User as UserIcon } from 'lucide-react';
+import { FileText, Settings, Users, TrendingUp, User as UserIcon, Plus, X } from 'lucide-react';
 import { adminService, authService } from '../services/authService';
 import Navigation from '../components/Navigation';
+import { GENDER_TERM_CATEGORIES } from '../utils/genderTermCategories';
 import '../styles/UserDashboard.css';
 
 interface User {
@@ -26,6 +27,7 @@ interface Mapping {
   id: number;
   biased_word: string;
   fair_word: string;
+  category: string;
 }
 
 interface AnalyticsData {
@@ -39,6 +41,7 @@ interface AnalyticsData {
   fairness_score_trend: Array<{ date: string; score: number }>;
   document_type_breakdown: Array<{ type: string; count: number }>;
   bias_categories_distribution: Array<{ category: string; count: number }>;
+  most_frequently_detected_categories?: Array<{ category: string; count: number; percentage: number }>;
   most_common_biased_words: Record<string, number>;
   support_summary: { total_messages: number; today: number; unresolved: number };
 }
@@ -190,12 +193,13 @@ export default function AdminDashboard() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newBiasedWord, setNewBiasedWord] = useState('');
-  const [newFairWord, setNewFairWord] = useState('');
+  const [newFairWords, setNewFairWords] = useState(['']);
+  const [newCategory, setNewCategory] = useState('other');
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateMessage, setDuplicateMessage] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<{
+  const [, setImportResult] = useState<{
     imported_rows: number;
     added_rows: number;
     updated_rows: number;
@@ -294,6 +298,22 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteUser = async (target: User) => {
+    const name = `${target.first_name} ${target.last_name}`.trim() || target.email;
+    if (!window.confirm(`Permanently delete ${name} (${target.email}) and their analysis history and support messages?`)) return;
+
+    try {
+      await adminService.deleteUser(target.id);
+      setUsers((prev) => prev.filter((user) => user.id !== target.id));
+      setAnalytics((prev) => prev ? { ...prev, total_users: Math.max(0, prev.total_users - 1) } : prev);
+      setCurrentPage((page) => Math.min(page, Math.max(1, Math.ceil((users.length - 1) / usersPerPage))));
+      setSuccessMessage('User and associated records deleted successfully.');
+      setError('');
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Failed to delete user.');
+    }
+  };
+
   const handleImportDataset = async () => {
     setError('');
     setSuccessMessage('');
@@ -388,7 +408,8 @@ export default function AdminDashboard() {
     () =>
       mappings.filter((mapping) =>
         mapping.biased_word.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        mapping.fair_word.toLowerCase().includes(searchTerm.toLowerCase())
+        mapping.fair_word.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        mapping.category.toLowerCase().includes(searchTerm.toLowerCase())
       ),
     [mappings, searchTerm]
   );
@@ -683,7 +704,7 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <div className="grid xl:grid-cols-3 gap-4 mb-8">
+            <div className="grid xl:grid-cols-2 gap-4 mb-8">
               <div className="card-lightblue rounded-2xl shadow p-6 border border-slate-200">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -724,67 +745,23 @@ export default function AdminDashboard() {
                     ))}
                   </div>
                 </div>
+                <div className="mt-5 border-t border-slate-200 pt-4">
+                  <p className="mb-2 text-sm font-semibold text-slate-700">Most frequently detected categories</p>
+                  {(analytics.most_frequently_detected_categories || []).length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {(analytics.most_frequently_detected_categories || []).map((item) => (
+                        <span key={item.category} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">
+                          {item.category}: {item.count} ({item.percentage}%)
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">No categorized terms detected yet.</p>
+                  )}
+                </div>
               </div>
 
-              <div className="card-lightblue rounded-2xl shadow p-6 border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-sm text-slate-500 uppercase tracking-[0.2em]">Document Types</p>
-                    <h2 className="text-xl font-semibold text-slate-900">Composition</h2>
-                  </div>
-                  <span className="text-xs text-slate-500">Live data</span>
-                </div>
-                <div className="flex flex-col xl:flex-row items-center gap-6">
-                  <div className="relative mx-auto w-full max-w-[300px]">
-                    <svg viewBox="0 0 220 220" className="h-full w-full">
-                      {buildPieSegments(
-                        analytics.document_type_breakdown
-                          .filter((item) => item.type?.toLowerCase() !== 'other')
-                          .map((item) => ({ label: item.type, value: item.count })),
-                        90,
-                        50,
-                        110
-                      ).map((segment) => (
-                        <path key={segment.label} d={segment.path} fill={segment.color} />
-                      ))}
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="text-center">
-                        <p className="text-xs text-slate-500 uppercase tracking-[0.2em]">Total</p>
-                        <p className="text-xl font-semibold text-slate-900">
-                          {analytics.document_type_breakdown
-                            .filter((item) => item.type?.toLowerCase() !== 'other')
-                            .reduce((sum, item) => sum + item.count, 0)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-full space-y-3">
-                      {buildPieSegments(
-                        analytics.document_type_breakdown
-                          .filter((item) => item.type?.toLowerCase() !== 'other')
-                          .map((item) => ({ label: item.type, value: item.count })),
-                        90,
-                        50,
-                        110
-                      ).map((segment) => (
-                        <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-300 px-2 py-1">
-                          <div className="flex items-center gap-3">
-                            <svg className="h-5 w-5" viewBox="0 0 8 8" aria-hidden="true">
-                              <circle cx="5" cy="5" r="5" fill={segment.color} />
-                            </svg>
-                            <span className="text-sm text-slate-700">{segment.label}</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-slate-900">{segment.value}</div>
-                            <div className="text-xs text-slate-500">{segment.percentage.toFixed(0)}%</div>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </div> 
-
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <div className="card-lightblue rounded-2xl shadow p-6 border border-slate-200">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -805,6 +782,63 @@ export default function AdminDashboard() {
                         </span>
                       </div>
                     ))}
+                </div>
+              </div>
+
+              <div className="card-lightblue rounded-2xl shadow p-6 border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-sm text-slate-500 uppercase tracking-[0.2em]">Document Types</p>
+                    <h2 className="text-xl font-semibold text-slate-900">Composition</h2>
+                  </div>
+                  <span className="text-xs text-slate-500">Live data</span>
+                </div>
+                <div className="flex flex-col items-center gap-6">
+                  <div className="relative mx-auto aspect-square w-full max-w-[220px]">
+                    <svg viewBox="0 0 220 220" className="absolute inset-0 h-full w-full">
+                      {buildPieSegments(
+                        analytics.document_type_breakdown
+                          .map((item) => ({ label: item.type, value: item.count })),
+                        90,
+                        50,
+                        110
+                      ).map((segment) => (
+                        <path key={segment.label} d={segment.path} fill={segment.color} />
+                      ))}
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="text-center">
+                        <p className="text-xs text-slate-500 uppercase tracking-[0.2em]">Total</p>
+                        <p className="text-xl font-semibold text-slate-900">
+                          {analytics.document_type_breakdown
+                            .reduce((sum, item) => sum + item.count, 0)}
+                        </p>
+                      </div>
+                    </div>
+                    </div>
+                  </div>
+                  <div className="w-full space-y-3">
+                    {buildPieSegments(
+                      analytics.document_type_breakdown
+                        .map((item) => ({ label: item.type, value: item.count })),
+                      90,
+                      50,
+                      110
+                    ).map((segment) => (
+                      <div key={segment.label} className="flex items-center justify-between gap-4 rounded-2xl bg-slate-300 px-2 py-1">
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5" viewBox="0 0 8 8" aria-hidden="true">
+                            <circle cx="5" cy="5" r="5" fill={segment.color} />
+                          </svg>
+                          <span className="text-sm text-slate-700">{segment.label}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-slate-900">{segment.value}</div>
+                          <div className="text-xs text-slate-500">{segment.percentage.toFixed(0)}%</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -831,6 +865,7 @@ export default function AdminDashboard() {
                   <th>Last Processed</th>
                   <th>Last Document</th>
                   <th>Score</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -847,6 +882,15 @@ export default function AdminDashboard() {
                     <td className="dashboard-table-cell text-slate-700">{usr.last_processed_at ? new Date(usr.last_processed_at).toLocaleString() : '—'}</td>
                     <td className="dashboard-table-cell text-slate-700">{usr.last_document_name || '—'}</td>
                     <td className="dashboard-table-cell text-slate-700">{usr.last_document_fairness_score != null ? `${usr.last_document_fairness_score}%` : '—'}</td>
+                    <td className="dashboard-table-cell">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(usr)}
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100"
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1077,6 +1121,7 @@ export default function AdminDashboard() {
                     <th>ID</th>
                     <th>Biased Word</th>
                     <th>Fair Alternative</th>
+                    <th>Category</th>
                     <th className="w-24">Action</th>
                   </tr>
                 </thead>
@@ -1086,6 +1131,9 @@ export default function AdminDashboard() {
                       <td className="dashboard-table-cell text-slate-700">{mapping.id}</td>
                       <td className="dashboard-table-cell font-semibold text-slate-900">{mapping.biased_word}</td>
                       <td className="dashboard-table-cell text-teal-700">{mapping.fair_word}</td>
+                      <td className="dashboard-table-cell text-slate-700">
+                        {GENDER_TERM_CATEGORIES.find((category) => category.value === mapping.category)?.label || 'Other'}
+                      </td>
                       <td className="dashboard-table-cell">
                         <button
                           type="button"
@@ -1137,43 +1185,101 @@ export default function AdminDashboard() {
                         <input
                           id="biased-word"
                           value={newBiasedWord}
-                          onChange={(e) => setNewBiasedWord(e.target.value)}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setNewBiasedWord(value);
+                            const existingMapping = mappings.find(
+                              (mapping) => mapping.biased_word.toLowerCase() === value.trim().toLowerCase()
+                            );
+                            setNewCategory(existingMapping?.category || 'other');
+                          }}
                           placeholder="Enter biased word"
                           title="Biased word"
                           className="w-full mt-1 px-3 py-2 border rounded-lg"
                         />
                       </div>
                       <div>
-                        <label htmlFor="fair-word" className="text-sm text-gray-700">Gender-Fair Term</label>
-                        <input
-                          id="fair-word"
-                          value={newFairWord}
-                          onChange={(e) => setNewFairWord(e.target.value)}
-                          placeholder="Enter fair alternative"
-                          title="Fair alternative"
-                          className="w-full mt-1 px-3 py-2 border rounded-lg"
-                        />
+                        <label htmlFor="term-category" className="text-sm text-gray-700">Term Category</label>
+                        <select
+                          id="term-category"
+                          value={newCategory}
+                          onChange={(event) => setNewCategory(event.target.value)}
+                          className="w-full mt-1 px-3 py-2 border rounded-lg bg-white text-gray-900"
+                        >
+                          {GENDER_TERM_CATEGORIES.map((category) => (
+                            <option key={category.value} value={category.value}>{category.label}</option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500">Classifies the biased term and all of its alternatives.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-700">Gender-Fair Alternatives</label>
+                        {newFairWords.map((fairWord, index) => (
+                          <div key={index} className="flex items-center gap-2">
+                            <input
+                              id={`fair-word-${index}`}
+                              value={fairWord}
+                              onChange={(e) => setNewFairWords((words) =>
+                                words.map((word, wordIndex) => wordIndex === index ? e.target.value : word)
+                              )}
+                              placeholder="Enter fair alternative"
+                              title={`Fair alternative ${index + 1}`}
+                              className="w-full px-3 py-2 border rounded-lg"
+                            />
+                            {newFairWords.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setNewFairWords((words) => words.filter((_, wordIndex) => wordIndex !== index))}
+                                aria-label={`Remove alternative ${index + 1}`}
+                                className="p-2 text-gray-500 hover:text-red-600"
+                              >
+                                <X size={18} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setNewFairWords((words) => [...words, ''])}
+                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                        >
+                          <Plus size={16} /> Add another alternative
+                        </button>
                       </div>
                     </div>
                     <div className="mt-4 flex justify-end gap-2">
-                      <button onClick={() => { setShowAddModal(false); setNewBiasedWord(''); setNewFairWord(''); }} className="px-4 py-2 bg-gray-100 rounded-lg">Cancel</button>
+                      <button onClick={() => { setShowAddModal(false); setNewBiasedWord(''); setNewFairWords(['']); setNewCategory('other'); }} className="px-4 py-2 bg-gray-100 rounded-lg">Cancel</button>
                       <button onClick={async () => {
                         try {
+                          const fairWords = newFairWords.map((word) => word.trim()).filter(Boolean);
+                          if (!newBiasedWord.trim() || fairWords.length !== newFairWords.length) {
+                            setError('Enter a biased word and fill in each fair alternative.');
+                            return;
+                          }
                           setLoading(true);
-                          const res = await adminService.addDatasetMapping({ biased_word: newBiasedWord.trim().toLowerCase(), fair_word: newFairWord.trim() });
-                          
-                          // Check if it's a duplicate
-                          if (res.data.is_duplicate) {
-                            setDuplicateMessage(`The biased word "${newBiasedWord}" already exists with the fair term "${res.data.fair_word}".`);
+                          const res = await adminService.addDatasetMapping({
+                            biased_word: newBiasedWord.trim().toLowerCase(),
+                            fair_words: fairWords,
+                            category: newCategory,
+                          });
+                          const addedMappings = res.data.mappings.filter((mapping: Mapping & { is_duplicate: boolean }) => !mapping.is_duplicate);
+                          const duplicateMappings = res.data.mappings.filter((mapping: Mapping & { is_duplicate: boolean }) => mapping.is_duplicate);
+                          setMappings((prev) => [
+                            ...addedMappings,
+                            ...prev.map((mapping) => mapping.biased_word === newBiasedWord.trim().toLowerCase()
+                              ? { ...mapping, category: newCategory }
+                              : mapping),
+                          ]);
+                          setShowAddModal(false);
+                          setNewBiasedWord('');
+                          setNewFairWords(['']);
+                          setNewCategory('other');
+                          if (duplicateMappings.length) {
+                            const duplicates = duplicateMappings.map((mapping: Mapping) => mapping.fair_word).join(', ');
+                            setDuplicateMessage(`These mappings already exist for "${newBiasedWord}": ${duplicates}.`);
                             setShowDuplicateModal(true);
-                            setShowAddModal(false);
                           } else {
-                            // Prepend new mapping to list
-                            setMappings((prev) => [res.data, ...prev]);
-                            setShowAddModal(false);
-                            setNewBiasedWord('');
-                            setNewFairWord('');
-                            setSuccessMessage('Mapping added successfully!');
+                            setSuccessMessage('Mappings added successfully!');
                             setTimeout(() => setSuccessMessage(''), 3000);
                           }
                         } catch (e: any) {
@@ -1192,7 +1298,7 @@ export default function AdminDashboard() {
               {showDuplicateModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
                   <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-lg">
-                    <h3 className="text-lg font-semibold mb-4 text-amber-600">⚠️ Bias Word Already Exists</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-amber-600">⚠️ Mapping Already Exists</h3>
                     <p className="text-gray-700 mb-6">{duplicateMessage}</p>
                     <div className="flex justify-end">
                       <button 
@@ -1200,7 +1306,8 @@ export default function AdminDashboard() {
                           setShowDuplicateModal(false);
                           setDuplicateMessage('');
                           setNewBiasedWord('');
-                          setNewFairWord('');
+                          setNewFairWords(['']);
+                          setNewCategory('other');
                         }} 
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg"
                       >
