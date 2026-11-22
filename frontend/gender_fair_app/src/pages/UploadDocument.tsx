@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import Navigation from '../components/Navigation';
 import DocumentPreview from '../components/DocumentPreview';
 import { analysisService } from '../services/authService';
-import { getGenderTermCategoryLabel } from '../utils/genderTermCategories';
+import type { WordLineLocation } from '../utils/documentLineNumbers';
 import '../styles/UploadDocument.css';
 import '../styles/DocumentPreview.css';
 
@@ -36,6 +36,9 @@ interface WordReplacement {
   category: string;
   approved: boolean;
   instanceId: string;
+  page?: number;
+  line?: number;
+  occurrence?: number;
 }
 
 const UploadDocument: React.FC = () => {
@@ -51,6 +54,7 @@ const UploadDocument: React.FC = () => {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [wordReplacements, setWordReplacements] = useState<WordReplacement[]>([]);
   const [focusReplacement, setFocusReplacement] = useState<WordReplacement | null>(null);
+  const [lineLocations, setLineLocations] = useState<Map<string, WordLineLocation[]>>(() => new Map());
   
   // UI feedback states
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +68,39 @@ const UploadDocument: React.FC = () => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const handleLineLocations = useCallback((locations: Map<string, WordLineLocation[]>) => {
+    setLineLocations((current) => {
+      const merged = new Map(current);
+      let changed = false;
+      locations.forEach((newLocations, word) => {
+        const existing = merged.get(word) || [];
+        let wordChanged = false;
+        const byOccurrence = new Map(existing.map((location) => [
+          `${location.page}:${location.occurrence}`,
+          location,
+        ]));
+        newLocations.forEach((location) => {
+          const key = `${location.page}:${location.occurrence}`;
+          if (byOccurrence.get(key)?.line !== location.line) {
+            byOccurrence.set(key, location);
+            wordChanged = true;
+          }
+        });
+        if (wordChanged) {
+          merged.set(word, Array.from(byOccurrence.values()).sort(
+            (left, right) => left.page - right.page || left.occurrence - right.occurrence,
+          ));
+          changed = true;
+        }
+      });
+      return changed ? merged : current;
+    });
+  }, []);
+  const getReplacementLocations = (replacement: WordReplacement) => (
+    lineLocations.get(replacement.original.toLocaleLowerCase())
+      ?? lineLocations.get(replacement.replacement.toLocaleLowerCase())
+  );
+  const getReplacementLocation = (replacement: WordReplacement) => getReplacementLocations(replacement)?.[0];
 
   // Cleanup on unmount
   useEffect(() => {
@@ -193,6 +230,7 @@ const UploadDocument: React.FC = () => {
     setAnalysisResult(null);
     setWordReplacements([]);
     setFocusReplacement(null);
+    setLineLocations(new Map());
     setHasSavedAnalysis(false);
   };
 
@@ -432,7 +470,11 @@ const UploadDocument: React.FC = () => {
     const item = wordReplacements.find(w => w.instanceId === instanceId);
     console.log(`🔄 Toggling approval for instanceId ${instanceId}:`, { before: item });
     if (item) {
-      setFocusReplacement({ ...item, approved: !item.approved });
+      setFocusReplacement({
+        ...item,
+        ...getReplacementLocation(item),
+        approved: !item.approved,
+      });
     }
     setWordReplacements(prev => {
       const next = prev.map((item) => 
@@ -460,7 +502,11 @@ const UploadDocument: React.FC = () => {
     setWordReplacements(prev => prev.map(item => ({ ...item, approved: true })));
     const firstUnapproved = wordReplacements.find(item => !item.approved);
     if (firstUnapproved) {
-      setFocusReplacement({ ...firstUnapproved, approved: true });
+      setFocusReplacement({
+        ...firstUnapproved,
+        ...getReplacementLocation(firstUnapproved),
+        approved: true,
+      });
     }
     setHasSavedAnalysis(false);
   };
@@ -729,6 +775,9 @@ const UploadDocument: React.FC = () => {
                       <p className="no-words">No biased words detected! ✓</p>
                     ) : (
                       wordReplacements.map((replacement) => {
+                        const locations = getReplacementLocations(replacement) || [];
+                        const firstLocation = locations[0];
+                        const lineNumbers = locations.map((location) => location.line).join(', ');
                         // DEBUG: Log the actual state
                         console.log(`Replacement ${replacement.instanceId}:`, { 
                           original: replacement.original, 
@@ -745,8 +794,22 @@ const UploadDocument: React.FC = () => {
                           }}
                         >
                           <div className="replacement-content">
+                            <button
+                              type="button"
+                              className="line-location-button"
+                              disabled={!firstLocation}
+                              onClick={() => firstLocation && setFocusReplacement({
+                                ...replacement,
+                                page: firstLocation.page,
+                                line: firstLocation.line,
+                                occurrence: firstLocation.occurrence,
+                              })}
+                              aria-label={firstLocation ? `Go to first occurrence on page ${firstLocation.page}, line ${firstLocation.line}` : 'Finding line locations'}
+                              title={firstLocation ? `${locations.length} occurrence${locations.length === 1 ? '' : 's'}; first is on page ${firstLocation.page}, line ${firstLocation.line}` : 'Finding line locations'}
+                            >
+                              {lineNumbers || '…'}
+                            </button>
                             <span className="original-word">{replacement.original}</span>
-                            <span className="replacement-category">{getGenderTermCategoryLabel(replacement.category)}</span>
                             <span className="arrow">→</span>
                             {replacement.alternatives.length > 1 ? (
                               <select
@@ -800,6 +863,7 @@ const UploadDocument: React.FC = () => {
                         fileData={analysisResult.file_data}
                         wordReplacements={wordReplacements}
                         focusReplacement={focusReplacement}
+                        onLineLocations={handleLineLocations}
                         downloadEnabled={hasSavedAnalysis}
                       />
 

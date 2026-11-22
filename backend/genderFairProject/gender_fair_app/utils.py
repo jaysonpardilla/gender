@@ -6,6 +6,7 @@ import os
 from io import BytesIO
 import textwrap
 import logging
+from decimal import Decimal
 
 # Prefer a writable workbook in the backend root. The legacy .xls file is still supported as a fallback.
 DATASET_DIR = Path(__file__).resolve().parent.parent.parent
@@ -680,6 +681,38 @@ def tokenize_text(text):
     return tokens
 
 
+def classify_gender_level(percentage):
+    """Return the continuum classification for an unrounded percentage."""
+    percentage = Decimal(str(percentage))
+    if percentage <= 20:
+        return 'gender_blind'
+    if percentage <= 40:
+        return 'gender_aware'
+    if percentage <= 60:
+        return 'gender_sensitive'
+    if percentage <= 80:
+        return 'gender_responsive'
+    return 'gender_transformative'
+
+
+def calculate_gender_level_metrics(text, detected_word_occurrences):
+    """Calculate continuum metrics from the same source text used for analysis."""
+    total_word_count = len(tokenize_text(text))
+    total_detected_biased_word_occurrences = len(detected_word_occurrences)
+    percentage = (
+        Decimal(total_detected_biased_word_occurrences * 100) / Decimal(total_word_count)
+        if total_word_count
+        else Decimal(0)
+    )
+
+    return {
+        'total_word_count': total_word_count,
+        'total_detected_biased_word_occurrences': total_detected_biased_word_occurrences,
+        'gender_bias_percentage': float(percentage),
+        'gender_level_classification': classify_gender_level(percentage),
+    }
+
+
 def preserve_replacement_case(original: str, replacement: str) -> str:
     """Match replacement casing to a lowercase, uppercase, or capitalized term."""
     if original.islower():
@@ -708,6 +741,7 @@ def analyze_text(text):
     dataset_categories = get_dataset_categories()
 
     detected_words = []
+    detected_word_occurrences = []
     replacements = {}
     replacement_alternatives = {}
     detected_term_categories = {}
@@ -745,6 +779,7 @@ def analyze_text(text):
             replacement_alternatives[matched_text] = fair_words_for_match or [fair]
             detected_term_categories[biased.lower()] = dataset_categories.get(biased.lower(), 'other')
             detected_words.append(biased)
+            detected_word_occurrences.append(biased)
 
             for i in range(start, end):
                 occupied[i] = True
@@ -772,6 +807,7 @@ def analyze_text(text):
         'original_text': text,
         'processed_text': processed_text,
         'detected_words': detected_words,
+        'detected_word_occurrences': detected_word_occurrences,
         'replacements': replacements,
         'replacement_alternatives': replacement_alternatives,
         'detected_term_categories': detected_term_categories,
@@ -787,12 +823,20 @@ def extract_text_from_txt(file):
 def extract_text_from_docx(file):
     """Extract text from .docx file"""
     from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
     
     doc = Document(file)
     text = []
-    for para in doc.paragraphs:
-        if para.text.strip():
-            text.append(para.text)
+    for block in doc.iter_inner_content():
+        if isinstance(block, Paragraph):
+            if block.text.strip():
+                text.append(block.text)
+        elif isinstance(block, Table):
+            for row in block.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        text.append(cell.text)
     
     # DOCX files are treated as single page (page breaks are not easily detectable)
     return '\n'.join(text)
@@ -825,7 +869,7 @@ def extract_text_from_pdf(file):
                 page_text = ''
             text.append(page_text)
 
-        return '[PAGE_BREAK]'.join(text)
+        return '\n'.join(text)
     except Exception:
         # If PyPDF2/pypdf not available or failed, try PyMuPDF (fitz)
         try:
@@ -838,7 +882,7 @@ def extract_text_from_pdf(file):
                     page_text = ''
                 text.append(page_text)
 
-            return '[PAGE_BREAK]'.join(text)
+            return '\n'.join(text)
         except Exception:
             raise ImportError(
                 "No PDF parser available. Install one of: PyPDF2, pypdf, or PyMuPDF. "

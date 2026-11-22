@@ -19,7 +19,7 @@ from .serializers import (
     DocumentSerializer, TextAnalysisSerializer, BiasedWordMappingSerializer,
     UserProfileSerializer, SupportMessageSerializer
 )
-from .utils import analyze_text, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow, append_mappings_to_excel_file, resolve_dataset_path, get_dataset_categories
+from .utils import analyze_text, calculate_gender_level_metrics, extract_text_from_file, load_dataset_to_db, create_document_file, modify_pdf_with_replacements, modify_pdf_with_text_reflow, append_mappings_to_excel_file, resolve_dataset_path, get_dataset_categories
 from .docx_handler import modify_docx_with_replacements
 from django.views.decorators.http import require_http_methods
 import json
@@ -292,6 +292,10 @@ def analyze_text_view(request):
     
     # Analyze text
     result = analyze_text(text)
+    gender_level_metrics = calculate_gender_level_metrics(
+        text,
+        result['detected_word_occurrences'],
+    )
     
     # Save to database
     document = Document.objects.create(
@@ -300,6 +304,7 @@ def analyze_text_view(request):
         processed_text=result['processed_text'],
         detected_words=result['detected_words'],
         detected_term_categories=result['detected_term_categories'],
+        **gender_level_metrics,
         approved_replacements_count=0,
         file_type='text'
     )
@@ -315,6 +320,7 @@ def analyze_text_view(request):
         'replacements': result['replacements'],
         'replacement_alternatives': result['replacement_alternatives'],
         'detected_term_categories': result['detected_term_categories'],
+        **gender_level_metrics,
         'created_at': document.created_at
     }, status=status.HTTP_200_OK)
 
@@ -350,13 +356,6 @@ def upload_document_view(request):
         # Extract text from file
         text, file_type = extract_text_from_file(file)
         
-        if not text.strip():
-            logger.warning(f"❌ UPLOAD DOCUMENT FAILED | User: {user} | File: {file_name} | Reason: No text found")
-            return Response(
-                {'error': 'No text found in file'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
         # Get original file bytes for preview rendering
         file.seek(0)  # Reset file pointer to beginning
         file_bytes = file.read()
@@ -365,6 +364,10 @@ def upload_document_view(request):
         
         # Analyze text
         result = analyze_text(text)
+        gender_level_metrics = calculate_gender_level_metrics(
+            text,
+            result['detected_word_occurrences'],
+        )
         
         # Allow an optional approved replacement count to be persisted when saving a corrected document
         approved_replacements_count = request.data.get('approved_replacements_count', 0)
@@ -380,6 +383,7 @@ def upload_document_view(request):
             processed_text=result['processed_text'],
             detected_words=result['detected_words'],
             detected_term_categories=result['detected_term_categories'],
+            **gender_level_metrics,
             approved_replacements_count=approved_replacements_count,
             file_name=file.name,
             file_type=file_type
@@ -398,6 +402,7 @@ def upload_document_view(request):
             'replacements': result['replacements'],
             'replacement_alternatives': result['replacement_alternatives'],
             'detected_term_categories': result['detected_term_categories'],
+            **gender_level_metrics,
             'file_data': file_data_base64,
             'created_at': document.created_at
         }, status=status.HTTP_200_OK)
@@ -1193,6 +1198,41 @@ def admin_analytics_view(request):
         key=lambda item: (-item['count'], item['category']),
     )[:3]
 
+    # Count uploaded files only; free-form text analyses are stored as file_type='text'.
+    gender_level_counts = {
+        row['gender_level_classification']: row['count']
+        for row in Document.objects.filter(
+            file_type__in=('txt', 'docx', 'pdf'),
+            gender_level_classification__in=[
+                value for value, _ in Document.GENDER_LEVEL_CHOICES
+            ]
+        ).values('gender_level_classification').annotate(count=Count('id'))
+    }
+    total_analyzed_documents = sum(gender_level_counts.values())
+    gender_level_ranges = {
+        'gender_blind': '0%-20%',
+        'gender_aware': '>20%-40%',
+        'gender_sensitive': '>40%-60%',
+        'gender_responsive': '>60%-80%',
+        'gender_transformative': '>80%-100%',
+    }
+    gender_level_continuum_analytics = {
+        'total_analyzed_documents': total_analyzed_documents,
+        'distribution': [
+            {
+                'classification': value,
+                'label': label,
+                'percentage_range': gender_level_ranges[value],
+                'count': gender_level_counts.get(value, 0),
+                'percentage': round(
+                    gender_level_counts.get(value, 0) * 100 / total_analyzed_documents,
+                    1,
+                ) if total_analyzed_documents else 0,
+            }
+            for value, label in Document.GENDER_LEVEL_CHOICES
+        ],
+    }
+
     # Support summary
     support_messages = SupportMessage.objects.all()
     support_today = support_messages.filter(created_at__date=timezone.now().date()).count()
@@ -1221,6 +1261,7 @@ def admin_analytics_view(request):
         'bias_categories_distribution': bias_categories_distribution,
         'most_frequently_detected_categories': most_frequently_detected_categories,
         'most_common_biased_words': most_common,
+        'gender_level_continuum_analytics': gender_level_continuum_analytics,
         'support_summary': {
             'total_messages': total_support,
             'today': support_today,

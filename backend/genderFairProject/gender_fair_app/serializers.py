@@ -81,8 +81,20 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = ['id', 'user_email', 'user_name', 'original_text', 'processed_text', 
-                  'detected_words', 'detected_term_categories', 'approved_replacements_count', 'file_name', 'file_type', 'created_at']
-        read_only_fields = ['processed_text', 'detected_words', 'approved_replacements_count', 'created_at']
+                  'detected_words', 'detected_term_categories', 'total_word_count',
+                  'total_detected_biased_word_occurrences', 'gender_bias_percentage',
+                  'gender_level_classification', 'approved_replacements_count',
+                  'file_name', 'file_type', 'created_at']
+        read_only_fields = [
+            'processed_text',
+            'detected_words',
+            'total_word_count',
+            'total_detected_biased_word_occurrences',
+            'gender_bias_percentage',
+            'gender_level_classification',
+            'approved_replacements_count',
+            'created_at',
+        ]
     
     def get_user_name(self, obj):
         return f"{obj.user.first_name} {obj.user.last_name}".strip()
@@ -114,7 +126,7 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 class TextAnalysisSerializer(serializers.Serializer):
     text = serializers.CharField(required=False, allow_blank=True)
-    file = serializers.FileField(required=False)
+    file = serializers.FileField(required=False, allow_empty_file=True)
     
     def validate(self, data):
         if not data.get('text') and not data.get('file'):

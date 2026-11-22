@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useMemo, Fragment, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, Fragment, useRef, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Settings, Users, TrendingUp, User as UserIcon, Plus, X } from 'lucide-react';
 import { adminService, authService } from '../services/authService';
@@ -43,6 +43,16 @@ interface AnalyticsData {
   bias_categories_distribution: Array<{ category: string; count: number }>;
   most_frequently_detected_categories?: Array<{ category: string; count: number; percentage: number }>;
   most_common_biased_words: Record<string, number>;
+  gender_level_continuum_analytics?: {
+    total_analyzed_documents: number;
+    distribution: Array<{
+      classification: string;
+      label: string;
+      percentage_range: string;
+      count: number;
+      percentage: number;
+    }>;
+  };
   support_summary: { total_messages: number; today: number; unresolved: number };
 }
 
@@ -124,6 +134,13 @@ const aggregateWeeklyData = (data: Array<{ date: string; count: number }>) => {
 };
 
 const chartColors = ['#6366f1', '#22c55e', '#fb7185', '#f59e0b', '#14b8a6', '#a855f7', '#f43f5e'];
+const continuumColors: Record<string, string> = {
+  gender_blind: '#14b8a6',
+  gender_aware: '#22c55e',
+  gender_sensitive: '#f59e0b',
+  gender_responsive: '#f97316',
+  gender_transformative: '#8b5cf6',
+};
 
 const buildPieSegments = (
   items: Array<{ label: string; value: number }>,
@@ -209,6 +226,39 @@ export default function AdminDashboard() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ label: string; value: number } | null>(null);
   const lineChartRef = useRef<HTMLDivElement | null>(null);
+  const analyticsScrollPositionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const scrollPositionKey = 'admin-dashboard-analytics-scroll-y';
+    const navigationEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    const isPageReload = navigationEntry?.type === 'reload';
+    const savedScrollPosition = isPageReload
+      ? Number(sessionStorage.getItem(scrollPositionKey))
+      : window.scrollY;
+    analyticsScrollPositionRef.current = Number.isFinite(savedScrollPosition) ? savedScrollPosition : 0;
+
+    const saveScrollPosition = () => {
+      analyticsScrollPositionRef.current = window.scrollY;
+      sessionStorage.setItem(scrollPositionKey, String(window.scrollY));
+    };
+
+    const previousScrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    window.addEventListener('scroll', saveScrollPosition, { passive: true });
+    window.addEventListener('pagehide', saveScrollPosition);
+
+    return () => {
+      window.removeEventListener('scroll', saveScrollPosition);
+      window.removeEventListener('pagehide', saveScrollPosition);
+      window.history.scrollRestoration = previousScrollRestoration;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (activeTab === 'analytics' && analytics && analyticsScrollPositionRef.current !== null) {
+      window.scrollTo(0, analyticsScrollPositionRef.current);
+    }
+  }, [activeTab, analytics]);
 
   const handleLineHover = (point: { date: string; count: number }, coords: { x: number; y: number }) => {
     if (!lineChartRef.current) return;
@@ -481,10 +531,12 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {loading && <p className="py-8 text-center text-gray-500">Loading...</p>}
+          {loading && (activeTab !== 'analytics' || !analytics) && (
+            <p className="py-8 text-center text-gray-500">Loading...</p>
+          )}
 
             {/* Analytics Tab */}
-          {activeTab === 'analytics' && analytics && !loading && (
+          {activeTab === 'analytics' && analytics && (
             <> 
             <div className="mb-6 pr-2">
               <h1 className="m-0 text-2xl font-bold text-purple-700">Admin Dashboard</h1>
@@ -842,6 +894,55 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
+
+            <section className="card-lightblue mb-8 rounded-2xl border border-slate-200 p-6 shadow">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Document classifications</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-900">Gender Level Continuum Analytics</h2>
+                </div>
+                <div className="rounded-xl bg-indigo-50 px-4 py-3 text-left sm:text-right">
+                  <p className="text-xs font-medium uppercase tracking-wide text-indigo-700">Total analyzed documents</p>
+                  <p className="text-2xl font-bold text-indigo-950">
+                    {analytics.gender_level_continuum_analytics?.total_analyzed_documents ?? 0}
+                  </p>
+                </div>
+              </div>
+
+              {(analytics.gender_level_continuum_analytics?.total_analyzed_documents ?? 0) === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center text-sm text-slate-500">
+                  No analyzed documents yet. Upload and analyze a document to see its classification here.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {(analytics.gender_level_continuum_analytics?.distribution ?? []).map((item) => (
+                    <div key={item.classification} className="grid gap-2 sm:grid-cols-[minmax(170px,1fr)_2fr_auto] sm:items-center sm:gap-4">
+                      <div className="flex items-center justify-between gap-3 sm:block">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: continuumColors[item.classification] ?? '#64748b' }} />
+                          <span className="font-medium text-slate-800">{item.label}</span>
+                        </div>
+                        <span className="text-xs text-slate-500 sm:mt-1 sm:block">{item.percentage_range} bias</span>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className="h-full rounded-full transition-[width] duration-500"
+                          style={{
+                            width: `${item.percentage}%`,
+                            backgroundColor: continuumColors[item.classification] ?? '#64748b',
+                          }}
+                        />
+                      </div>
+                      <div className="flex min-w-[6rem] justify-between gap-3 text-sm sm:block sm:text-right">
+                        <span className="font-semibold text-slate-900">{item.count} documents</span>
+                        <span className="text-slate-500 sm:mt-1 sm:block">{item.percentage.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
 
           </>
         )}

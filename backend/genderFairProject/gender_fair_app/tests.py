@@ -16,7 +16,14 @@ from rest_framework.test import APIClient
 
 from gender_fair_app.docx_handler import modify_docx_with_replacements
 from gender_fair_app.models import BiasedWordMapping, Document, UserProfile
-from gender_fair_app.utils import analyze_text, append_mappings_to_excel_file, modify_pdf_with_replacements
+from gender_fair_app.utils import (
+    analyze_text,
+    append_mappings_to_excel_file,
+    calculate_gender_level_metrics,
+    classify_gender_level,
+    create_pdf_from_text,
+    modify_pdf_with_replacements,
+)
 
 
 class SignupTests(TestCase):
@@ -617,6 +624,230 @@ class DocumentFormattingTests(TestCase):
 
 
 class AdminAnalyticsTests(TestCase):
+    def test_gender_level_boundaries_and_empty_document_metrics(self):
+        cases = [
+            (0, 'gender_blind'),
+            (20, 'gender_blind'),
+            (20.5, 'gender_aware'),
+            (40, 'gender_aware'),
+            (40.5, 'gender_sensitive'),
+            (60, 'gender_sensitive'),
+            (60.5, 'gender_responsive'),
+            (80, 'gender_responsive'),
+            (80.5, 'gender_transformative'),
+            (100, 'gender_transformative'),
+        ]
+        for percentage, expected in cases:
+            with self.subTest(percentage=percentage):
+                self.assertEqual(classify_gender_level(percentage), expected)
+
+        self.assertEqual(
+            calculate_gender_level_metrics('', []),
+            {
+                'total_word_count': 0,
+                'total_detected_biased_word_occurrences': 0,
+                'gender_bias_percentage': 0.0,
+                'gender_level_classification': 'gender_blind',
+            },
+        )
+
+    def test_analyzer_preserves_repeated_occurrences_without_overlapping_matches(self):
+        BiasedWordMapping.objects.create(biased_word='new york', fair_word='New York City')
+        BiasedWordMapping.objects.create(biased_word='york', fair_word='Yorkshire')
+        cache.delete('gender_fair_dataset')
+        cache.delete('gender_fair_dataset_alternatives')
+        cache.delete('gender_fair_dataset_categories')
+
+        result = analyze_text('New York, New York.')
+
+        self.assertEqual(result['detected_words'], ['new york'])
+        self.assertEqual(result['detected_word_occurrences'], ['new york', 'new york'])
+        metrics = calculate_gender_level_metrics('New York, New York.', result['detected_word_occurrences'])
+        self.assertEqual(metrics['total_word_count'], 4)
+        self.assertEqual(metrics['total_detected_biased_word_occurrences'], 2)
+
+    def test_upload_saves_consistent_metrics_for_txt_docx_and_pdf(self):
+        user = User.objects.create_user(username='continuum-upload@example.com', password='password123')
+        BiasedWordMapping.objects.create(biased_word='chairman', fair_word='chairperson')
+        cache.delete('gender_fair_dataset')
+        cache.delete('gender_fair_dataset_alternatives')
+        cache.delete('gender_fair_dataset_categories')
+
+        docx_content = io.BytesIO()
+        docx = DocxDocument()
+        docx.add_paragraph('chairman and chairman')
+        table = docx.add_table(rows=1, cols=1)
+        table.cell(0, 0).text = 'chairman'
+        docx.save(docx_content)
+        docx_content.seek(0)
+
+        files = [
+            SimpleUploadedFile(
+                'sample.txt',
+                b'chairman and chairman chairman',
+                content_type='text/plain',
+            ),
+            SimpleUploadedFile(
+                'sample.docx',
+                docx_content.read(),
+                content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ),
+            SimpleUploadedFile(
+                'sample.pdf',
+                create_pdf_from_text('chairman and chairman chairman').getvalue(),
+                content_type='application/pdf',
+            ),
+        ]
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        for uploaded_file in files:
+            with self.subTest(file_type=uploaded_file.name.split('.')[-1]):
+                response = client.post(
+                    '/api/upload-document/',
+                    {'file': uploaded_file},
+                    format='multipart',
+                )
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data['total_word_count'], 4)
+                self.assertEqual(response.data['total_detected_biased_word_occurrences'], 3)
+                self.assertEqual(response.data['gender_bias_percentage'], 75.0)
+                self.assertEqual(response.data['gender_level_classification'], 'gender_responsive')
+
+                document = Document.objects.get(id=response.data['document_id'])
+                self.assertEqual(document.total_word_count, 4)
+                self.assertEqual(document.total_detected_biased_word_occurrences, 3)
+                self.assertEqual(document.gender_level_classification, 'gender_responsive')
+
+        zero_bias_response = client.post(
+            '/api/analyze-text/',
+            {'text': 'neutral document language'},
+            format='json',
+        )
+        self.assertEqual(zero_bias_response.status_code, 200)
+        self.assertEqual(zero_bias_response.data['total_word_count'], 3)
+        self.assertEqual(zero_bias_response.data['total_detected_biased_word_occurrences'], 0)
+        self.assertEqual(zero_bias_response.data['gender_level_classification'], 'gender_blind')
+        zero_bias_document = Document.objects.get(id=zero_bias_response.data['document_id'])
+        self.assertEqual(zero_bias_document.total_detected_biased_word_occurrences, 0)
+        self.assertEqual(zero_bias_document.gender_level_classification, 'gender_blind')
+
+        empty_response = client.post(
+            '/api/upload-document/',
+            {'file': SimpleUploadedFile('empty.txt', b'', content_type='text/plain')},
+            format='multipart',
+        )
+        self.assertEqual(empty_response.status_code, 200, empty_response.data)
+        self.assertEqual(empty_response.data['total_word_count'], 0)
+        self.assertEqual(empty_response.data['total_detected_biased_word_occurrences'], 0)
+        self.assertEqual(empty_response.data['gender_bias_percentage'], 0.0)
+        self.assertEqual(empty_response.data['gender_level_classification'], 'gender_blind')
+
+    def test_admin_gender_level_analytics_aggregates_saved_classifications_once(self):
+        admin = User.objects.create_user(
+            username='admin-continuum@example.com',
+            email='admin-continuum@example.com',
+            password='password123',
+        )
+        admin.profile.role = 'admin'
+        admin.profile.save()
+        for classification, file_type in (
+            ('gender_blind', 'txt'),
+            ('gender_blind', 'docx'),
+            ('gender_aware', 'pdf'),
+        ):
+            Document.objects.create(
+                user=admin,
+                original_text='saved result',
+                processed_text='saved result',
+                gender_level_classification=classification,
+                file_type=file_type,
+            )
+        Document.objects.create(
+            user=admin,
+            original_text='legacy blank record',
+            processed_text='legacy blank record',
+        )
+        Document.objects.create(
+            user=admin,
+            original_text='free-form text analysis',
+            processed_text='free-form text analysis',
+            gender_level_classification='gender_sensitive',
+            file_type='text',
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get('/api/admin/analytics/')
+
+        self.assertEqual(response.status_code, 200)
+        continuum = response.data['gender_level_continuum_analytics']
+        self.assertEqual(continuum['total_analyzed_documents'], 3)
+        distribution = {item['classification']: item for item in continuum['distribution']}
+        self.assertEqual(distribution['gender_blind']['count'], 2)
+        self.assertEqual(distribution['gender_blind']['percentage'], 66.7)
+        self.assertEqual(distribution['gender_aware']['count'], 1)
+        self.assertEqual(distribution['gender_aware']['percentage'], 33.3)
+        self.assertEqual(distribution['gender_transformative']['count'], 0)
+
+    def test_admin_gender_level_analytics_updates_from_uploaded_files_only(self):
+        admin = User.objects.create_user(
+            username='admin-continuum-live@example.com',
+            email='admin-continuum-live@example.com',
+            password='password123',
+        )
+        admin.profile.role = 'admin'
+        admin.profile.save()
+        client = APIClient()
+        client.force_authenticate(user=admin)
+
+        initial = client.get('/api/admin/analytics/')
+        self.assertEqual(initial.data['gender_level_continuum_analytics']['total_analyzed_documents'], 0)
+
+        upload_response = client.post(
+            '/api/upload-document/',
+            {'file': SimpleUploadedFile('uploaded.txt', b'plain document language', content_type='text/plain')},
+            format='multipart',
+        )
+        self.assertEqual(upload_response.status_code, 200, upload_response.data)
+
+        after_upload = client.get('/api/admin/analytics/')
+        continuum = after_upload.data['gender_level_continuum_analytics']
+        self.assertEqual(continuum['total_analyzed_documents'], 1)
+        blind = next(item for item in continuum['distribution'] if item['classification'] == 'gender_blind')
+        self.assertEqual(blind['count'], 1)
+
+        text_response = client.post(
+            '/api/analyze-text/',
+            {'text': 'plain text analysis language'},
+            format='json',
+        )
+        self.assertEqual(text_response.status_code, 200)
+        after_text_analysis = client.get('/api/admin/analytics/')
+        self.assertEqual(
+            after_text_analysis.data['gender_level_continuum_analytics']['total_analyzed_documents'],
+            1,
+        )
+
+    def test_admin_gender_level_analytics_returns_zero_distribution_when_empty(self):
+        admin = User.objects.create_user(
+            username='admin-continuum-empty@example.com',
+            email='admin-continuum-empty@example.com',
+            password='password123',
+        )
+        admin.profile.role = 'admin'
+        admin.profile.save()
+        client = APIClient()
+        client.force_authenticate(user=admin)
+
+        response = client.get('/api/admin/analytics/')
+
+        self.assertEqual(response.status_code, 200)
+        continuum = response.data['gender_level_continuum_analytics']
+        self.assertEqual(continuum['total_analyzed_documents'], 0)
+        self.assertEqual(len(continuum['distribution']), 5)
+        self.assertTrue(all(item['count'] == 0 for item in continuum['distribution']))
+
     def test_admin_analytics_counts_categories_from_saved_documents(self):
         admin = User.objects.create_user(username='admin-category-analytics@example.com', email='admin-category-analytics@example.com', password='password123')
         admin.profile.role = 'admin'

@@ -1,12 +1,16 @@
 import PdfViewer from './PdfViewer';
 import DocxRenderer from './DocxRenderer';
 import { memo } from 'react';
+import type { WordLineLocation } from '../utils/documentLineNumbers';
 
 interface WordReplacement {
   original: string;
   replacement: string;
   approved: boolean;
   instanceId: string;
+  page?: number;
+  line?: number;
+  occurrence?: number;
 }
 
 interface Props {
@@ -18,6 +22,7 @@ interface Props {
   onSaveDocument?: (modifiedBytes: Uint8Array) => void;
   isLoading?: boolean;
   downloadEnabled?: boolean;
+  onLineLocations?: (locations: Map<string, WordLineLocation[]>) => void;
 }
 
 /**
@@ -33,6 +38,7 @@ const DocumentViewerContent: React.FC<Props> = ({
   onSaveDocument,
   isLoading = false,
   downloadEnabled = false,
+  onLineLocations,
 }) => {
 
   // Normalize file type
@@ -47,7 +53,7 @@ const DocumentViewerContent: React.FC<Props> = ({
   if (isLoading) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4" />
+        <div className="document-loading-spinner mb-4" aria-hidden="true" />
         <p className="text-gray-600">Loading document...</p>
       </div>
     );
@@ -70,6 +76,7 @@ const DocumentViewerContent: React.FC<Props> = ({
         wordReplacements={wordReplacements}
         focusReplacement={focusReplacement}
         onSavePdf={onSaveDocument}
+        onLineLocations={onLineLocations}
         downloadEnabled={downloadEnabled}
       />
     );
@@ -83,6 +90,7 @@ const DocumentViewerContent: React.FC<Props> = ({
         fileName={fileName}
         wordReplacements={wordReplacements}
         focusReplacement={focusReplacement}
+        onLineLocations={onLineLocations}
         downloadEnabled={downloadEnabled}
       />
     );

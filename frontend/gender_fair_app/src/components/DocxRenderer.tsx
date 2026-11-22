@@ -14,12 +14,16 @@ import {
   validateDocxStructure,
 } from '../utils/docxDebugger';
 import { modifyDocxWithReplacements } from '../utils/documentModifier';
+import { addDocumentLineNumbers, type WordLineLocation } from '../utils/documentLineNumbers';
 
 interface WordReplacement {
   original: string;
   replacement: string;
   approved: boolean;
   instanceId: string;
+  page?: number;
+  line?: number;
+  occurrence?: number;
 }
 
 interface DocxRendererProps {
@@ -28,6 +32,7 @@ interface DocxRendererProps {
   wordReplacements?: WordReplacement[];
   focusReplacement: WordReplacement | null;
   downloadEnabled?: boolean;
+  onLineLocations?: (locations: Map<string, WordLineLocation[]>) => void;
 }
 
 interface RenderedPage {
@@ -118,6 +123,8 @@ interface DocxPageDisplayProps {
   wordReplacements: WordReplacement[];
   focusReplacement: WordReplacement | null;
   highlightWordsPerOccurrence: (container: HTMLElement, wordReplacements: WordReplacement[]) => void;
+  onLineLocations?: (locations: Map<string, WordLineLocation[]>) => void;
+  startLineNumber?: number;
 }
 
 const normalizeColor = (value: string | null): string => value?.replace(/\s+/g, '').toLowerCase() ?? '';
@@ -243,7 +250,7 @@ const removeBlackArtifacts = (root: HTMLElement) => {
 };
 
 // Memoized page display component - only updates when currentPage or highlighting changes
-const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence }) => {
+const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence, onLineLocations, startLineNumber }) => {
   const pageContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -264,16 +271,23 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
       const docxSection = cloned.querySelector('section.docx') as HTMLElement | null;
       if (docxSection) {
         highlightWordsPerOccurrence(docxSection, wordReplacements);
+        if (onLineLocations) {
+          onLineLocations(addDocumentLineNumbers(cloned, currentPage.pageNum, [], startLineNumber).locations);
+        }
 
         const focusTerm = focusReplacement
           ? (focusReplacement.approved ? focusReplacement.replacement : focusReplacement.original).trim().toLocaleLowerCase()
           : '';
-        if (focusTerm) {
+        if (focusTerm && focusReplacement) {
           const highlightType = focusReplacement?.approved ? 'replacement' : 'original';
           const target = Array.from(docxSection.querySelectorAll<HTMLElement>('.bias-word-highlight')).find(
             (highlight) =>
               highlight.getAttribute('data-highlight-type') === highlightType &&
-              highlight.textContent?.trim().toLocaleLowerCase() === focusTerm,
+              highlight.textContent?.trim().toLocaleLowerCase() === focusTerm &&
+              (!focusReplacement.line ||
+                highlight.getAttribute('data-document-line') === String(focusReplacement.line)) &&
+              (!focusReplacement.occurrence ||
+                highlight.getAttribute('data-document-occurrence') === String(focusReplacement.occurrence)),
           );
           if (target) {
             target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
@@ -281,7 +295,7 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
         }
       }
     }
-  }, [currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence]);
+  }, [currentPage, wordReplacements, focusReplacement, highlightWordsPerOccurrence, onLineLocations, startLineNumber]);
 
   return (
     <div
@@ -290,35 +304,29 @@ const DocxPageDisplay = memo<DocxPageDisplayProps>(({ currentPage, wordReplaceme
     />
   );
 }, (prevProps, nextProps) => {
-  // Custom comparison - only re-render if currentPage changes or approved replacements change
+  // Re-render when the displayed page, detected terms, or focused replacement changes.
   if (prevProps.currentPage !== nextProps.currentPage) return false;
   if (prevProps.focusReplacement?.instanceId !== nextProps.focusReplacement?.instanceId) return false;
   if (prevProps.focusReplacement?.approved !== nextProps.focusReplacement?.approved) return false;
-  
-  const prevApproved = prevProps.wordReplacements.filter(r => r.approved);
-  const nextApproved = nextProps.wordReplacements.filter(r => r.approved);
-  
-  if (prevApproved.length !== nextApproved.length) return false;
-  
-  return prevApproved.every((item, index) => {
-    const nextItem = nextApproved[index];
-    return (
-      item.original === nextItem.original &&
-      item.replacement === nextItem.replacement &&
-      item.approved === nextItem.approved &&
-      item.instanceId === nextItem.instanceId
-    );
+  if (prevProps.focusReplacement?.page !== nextProps.focusReplacement?.page) return false;
+  if (prevProps.focusReplacement?.line !== nextProps.focusReplacement?.line) return false;
+  if (prevProps.focusReplacement?.occurrence !== nextProps.focusReplacement?.occurrence) return false;
+  if (prevProps.onLineLocations !== nextProps.onLineLocations) return false;
+  if (prevProps.startLineNumber !== nextProps.startLineNumber) return false;
+  if (prevProps.wordReplacements.length !== nextProps.wordReplacements.length) return false;
+
+  return prevProps.wordReplacements.every((item, index) => {
+    const nextItem = nextProps.wordReplacements[index];
+    return item.original === nextItem.original
+      && item.replacement === nextItem.replacement
+      && item.approved === nextItem.approved
+      && item.instanceId === nextItem.instanceId;
   });
 });
 
 DocxPageDisplay.displayName = 'DocxPageDisplay';
 
-// Helper function to get only approved replacements
-const getApprovedReplacements = (replacements: WordReplacement[]): WordReplacement[] => {
-  return replacements.filter(r => r.approved);
-};
-
-// Custom comparison function - only re-render if approved replacements change
+// Custom comparison function for the document and its detected terms.
 const areDocxPropsEqual = (prevProps: DocxRendererProps, nextProps: DocxRendererProps): boolean => {
   // Always re-render if docxBytes or fileName changes
   if (prevProps.docxBytes !== nextProps.docxBytes) return false;
@@ -326,23 +334,21 @@ const areDocxPropsEqual = (prevProps: DocxRendererProps, nextProps: DocxRenderer
   if (prevProps.downloadEnabled !== nextProps.downloadEnabled) return false;
   if (prevProps.focusReplacement?.instanceId !== nextProps.focusReplacement?.instanceId) return false;
   if (prevProps.focusReplacement?.approved !== nextProps.focusReplacement?.approved) return false;
+  if (prevProps.focusReplacement?.page !== nextProps.focusReplacement?.page) return false;
+  if (prevProps.focusReplacement?.line !== nextProps.focusReplacement?.line) return false;
+  if (prevProps.focusReplacement?.occurrence !== nextProps.focusReplacement?.occurrence) return false;
+  if (prevProps.onLineLocations !== nextProps.onLineLocations) return false;
 
-  // Only compare approved replacements, not the entire array
-  const prevApproved = getApprovedReplacements(prevProps.wordReplacements || []);
-  const nextApproved = getApprovedReplacements(nextProps.wordReplacements || []);
+  const prevReplacements = prevProps.wordReplacements || [];
+  const nextReplacements = nextProps.wordReplacements || [];
+  if (prevReplacements.length !== nextReplacements.length) return false;
 
-  // If lengths are different, they're not equal
-  if (prevApproved.length !== nextApproved.length) return false;
-
-  // Compare each approved item
-  return prevApproved.every((item, index) => {
-    const nextItem = nextApproved[index];
-    return (
-      item.original === nextItem.original &&
-      item.replacement === nextItem.replacement &&
-      item.approved === nextItem.approved &&
-      item.instanceId === nextItem.instanceId
-    );
+  return prevReplacements.every((item, index) => {
+    const nextItem = nextReplacements[index];
+    return item.original === nextItem.original
+      && item.replacement === nextItem.replacement
+      && item.approved === nextItem.approved
+      && item.instanceId === nextItem.instanceId;
   });
 };
 
@@ -406,14 +412,22 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   wordReplacements = [],
   focusReplacement,
   downloadEnabled = false,
+  onLineLocations,
 }) => {
   const [pages, setPages] = useState<RenderedPage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [activeDocxBytes, setActiveDocxBytes] = useState<Uint8Array>(docxBytes);
+  const [manualNavigationFocusKey, setManualNavigationFocusKey] = useState<string | null>(null);
+  const [lineNumberStarts, setLineNumberStarts] = useState<Map<number, number>>(() => new Map());
   const offscreenContainerRef = useRef<HTMLDivElement | null>(null);
+  const lineMeasurementRef = useRef<HTMLDivElement | null>(null);
   const renderVersionRef = useRef(0);
+
+  const focusKey = focusReplacement
+    ? `${focusReplacement.instanceId}:${focusReplacement.approved}:${focusReplacement.page ?? ''}:${focusReplacement.line ?? ''}:${focusReplacement.occurrence ?? ''}:${focusReplacement.replacement}`
+    : '';
 
   // Helper: Remove all highlights from a container
   const removeAllHighlights = useCallback((container: HTMLElement) => {
@@ -563,6 +577,39 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   );
 
   useEffect(() => {
+    const measurementContainer = lineMeasurementRef.current;
+    if (!measurementContainer || pages.length === 0 || !onLineLocations) return;
+
+    measurementContainer.style.width = `${measurementContainer.parentElement?.clientWidth || pages[0].settings.width}px`;
+
+    let nextLineNumber = 1;
+    const starts = new Map<number, number>();
+    pages.forEach((page) => {
+      const clone = page.element.cloneNode(true) as HTMLElement;
+      clone.style.transformOrigin = 'top center';
+      clone.style.width = '100%';
+      clone.style.maxWidth = '100%';
+      measurementContainer.appendChild(clone);
+      removeBlackArtifacts(clone);
+      removeBlackSvgArtifacts(clone);
+      removeDocxFooterArtifacts(clone);
+      removeDocxHeaderArtifacts(clone);
+
+      const docxSection = clone.querySelector('section.docx') as HTMLElement | null;
+      if (docxSection) {
+        memoizedHighlight(docxSection, wordReplacements);
+        starts.set(page.pageNum, nextLineNumber);
+        const result = addDocumentLineNumbers(clone, page.pageNum, [], nextLineNumber);
+        onLineLocations(result.locations);
+        nextLineNumber += result.lineCount;
+      }
+
+      measurementContainer.removeChild(clone);
+    });
+    setLineNumberStarts(starts);
+  }, [pages, wordReplacements, memoizedHighlight, onLineLocations]);
+
+  useEffect(() => {
     return () => {
       if (offscreenContainerRef.current) {
         document.body.removeChild(offscreenContainerRef.current);
@@ -612,6 +659,10 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   const focusedPageIndex = useMemo(() => {
     if (pages.length === 0) return currentPageIndex;
     const selectedPageIndex = Math.min(currentPageIndex, pages.length - 1);
+    if (manualNavigationFocusKey === focusKey) return selectedPageIndex;
+    if (focusReplacement?.page) {
+      return Math.min(focusReplacement.page - 1, pages.length - 1);
+    }
     if (!focusReplacement) return selectedPageIndex;
     const focusTerm = (
       focusReplacement.approved ? focusReplacement.replacement : focusReplacement.original
@@ -624,14 +675,8 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
       .map((page, index) => ({ index, text: page.element.textContent?.toLocaleLowerCase() || '' }))
       .filter(({ text }) => text.includes(focusTerm))
       .map(({ index }) => index);
-    return matchingPages.reduce(
-      (nearest, candidateIndex) =>
-        Math.abs(candidateIndex - selectedPageIndex) < Math.abs(nearest - selectedPageIndex)
-          ? candidateIndex
-          : nearest,
-      selectedPageIndex,
-    );
-  }, [pages, currentPageIndex, focusReplacement]);
+    return matchingPages[0] ?? selectedPageIndex;
+  }, [pages, currentPageIndex, focusReplacement, focusKey, manualNavigationFocusKey]);
 
   // Extract and render DOCX
   useEffect(() => {
@@ -874,7 +919,22 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
   if (loading) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4" />
+        <svg
+          className="document-preview-spinner-icon mb-4"
+          width="44"
+          height="44"
+          viewBox="0 0 44 44"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient id="document-preview-spinner-gradient">
+              <stop offset="0%" stopColor="#2563eb" />
+              <stop offset="100%" stopColor="#8b5cf6" />
+            </linearGradient>
+          </defs>
+          <circle className="document-preview-spinner-track" cx="22" cy="22" r="18" />
+          <circle className="document-preview-spinner-arc" cx="22" cy="22" r="18" />
+        </svg>
         <p className="text-gray-600">Rendering DOCX preview...</p>
       </div>
     );
@@ -903,6 +963,18 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
 
   return (
     <div className="h-full flex flex-col docx-viewer">
+      <div
+        ref={lineMeasurementRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: '-100000px',
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }}
+      />
       {/* Main Content Area - Only the page display will re-render on highlighting changes */}
       <div className="flex-1 overflow-auto p-0">
         {currentPage && (
@@ -911,6 +983,8 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
             wordReplacements={wordReplacements}
             focusReplacement={focusReplacement}
             highlightWordsPerOccurrence={memoizedHighlight}
+            onLineLocations={onLineLocations}
+            startLineNumber={lineNumberStarts.get(currentPage.pageNum)}
           />
         )}
       </div>
@@ -919,14 +993,20 @@ const DocxRendererContent: React.FC<DocxRendererProps> = ({
       <div className="bg-white border-t border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex gap-2">
           <button
-            onClick={() => setCurrentPageIndex(Math.max(0, focusedPageIndex - 1))}
+            onClick={() => {
+              setManualNavigationFocusKey(focusKey);
+              setCurrentPageIndex(Math.max(0, focusedPageIndex - 1));
+            }}
             disabled={focusedPageIndex === 0}
             className="px-3 py-1 bg-blue-500 text-white rounded disabled:bg-gray-300 hover:bg-blue-600"
           >
             ← Prev
           </button>
           <button
-            onClick={() => setCurrentPageIndex(Math.min(pages.length - 1, focusedPageIndex + 1))}
+            onClick={() => {
+              setManualNavigationFocusKey(focusKey);
+              setCurrentPageIndex(Math.min(pages.length - 1, focusedPageIndex + 1));
+            }}
             disabled={focusedPageIndex === pages.length - 1}
             className="px-3 py-1 bg-blue-500 text-white rounded disabled:bg-gray-300 hover:bg-blue-600"
           >

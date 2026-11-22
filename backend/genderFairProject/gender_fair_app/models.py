@@ -41,11 +41,28 @@ def create_user_profile(sender, instance, created, **kwargs):
 
 
 class Document(models.Model):
+    GENDER_LEVEL_CHOICES = [
+        ('gender_blind', 'Gender Blind'),
+        ('gender_aware', 'Gender Aware'),
+        ('gender_sensitive', 'Gender Sensitive'),
+        ('gender_responsive', 'Gender Responsive'),
+        ('gender_transformative', 'Gender Transformative'),
+    ]
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='documents')
     original_text = models.TextField()
     processed_text = models.TextField()
     detected_words = models.JSONField(default=list, blank=True)  # List of detected biased words
     detected_term_categories = models.JSONField(default=dict, blank=True)
+    total_word_count = models.PositiveIntegerField(default=0)
+    total_detected_biased_word_occurrences = models.PositiveIntegerField(default=0)
+    gender_bias_percentage = models.FloatField(default=0.0)
+    gender_level_classification = models.CharField(
+        max_length=32,
+        choices=GENDER_LEVEL_CHOICES,
+        blank=True,
+        default='',
+    )
     approved_replacements_count = models.IntegerField(default=0)
     file_name = models.CharField(max_length=255, null=True, blank=True)
     file_type = models.CharField(max_length=10, null=True, blank=True)  # txt, docx, pdf

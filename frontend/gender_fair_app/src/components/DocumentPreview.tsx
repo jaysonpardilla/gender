@@ -1,12 +1,16 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import React, { useEffect, useState, memo } from 'react';
 import DocumentViewer from "./DocumentViewer";
+import type { WordLineLocation } from '../utils/documentLineNumbers';
 
 interface WordReplacement {
   original: string;
   replacement: string;
   approved: boolean;
   instanceId: string;
+  page?: number;
+  line?: number;
+  occurrence?: number;
 }
 
 type FileDataInput =
@@ -34,6 +38,7 @@ interface Props {
   focusReplacement: WordReplacement | null;
   onModifiedPdfChange?: React.Dispatch<React.SetStateAction<Uint8Array | null>>;
   downloadEnabled?: boolean;
+  onLineLocations?: (locations: Map<string, WordLineLocation[]>) => void;
 }
 
 /**
@@ -48,6 +53,7 @@ const DocumentPreviewContent: React.FC<Props> = ({
   focusReplacement,
   onModifiedPdfChange,
   downloadEnabled = false,
+  onLineLocations,
 }) => {
   const [documentBytes, setDocumentBytes] = useState<Uint8Array | null>(null);
   const [loading, setLoading] = useState(true);
@@ -195,6 +201,7 @@ const DocumentPreviewContent: React.FC<Props> = ({
       wordReplacements={wordReplacements}
       focusReplacement={focusReplacement}
       onSaveDocument={handleSaveDocument}
+      onLineLocations={onLineLocations}
       downloadEnabled={downloadEnabled}
       isLoading={loading}
     />

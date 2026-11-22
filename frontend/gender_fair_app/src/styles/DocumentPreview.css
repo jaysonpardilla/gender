@@ -1,5 +1,54 @@
 /* Document Preview Styles */
 
+.document-loading-spinner {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border: 4px solid #e0e7ff;
+  border-top-color: #2563eb;
+  border-right-color: #8b5cf6;
+  border-radius: 50%;
+  animation: document-spinner-rotate 0.8s linear infinite;
+}
+
+.document-loading-spinner--small {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.document-preview-spinner-icon {
+  display: block;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px;
+  max-width: 44px;
+  flex: 0 0 44px;
+  animation: document-spinner-rotate 0.9s linear infinite;
+}
+
+.document-preview-spinner-track,
+.document-preview-spinner-arc {
+  fill: none;
+  stroke-width: 3;
+}
+
+.document-preview-spinner-track {
+  stroke: #e0e7ff;
+}
+
+.document-preview-spinner-arc {
+  stroke: url(#document-preview-spinner-gradient);
+  stroke-dasharray: 48 113;
+  stroke-linecap: round;
+}
+
+@keyframes document-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .document-preview-container {
   display: flex;
   flex-direction: column;
@@ -104,6 +153,36 @@
 
 .docx-viewer .docx-page:last-child {
   margin-bottom: 0;
+}
+
+.document-line-number-gutter {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34px;
+  overflow: hidden;
+  z-index: 5;
+  pointer-events: none;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.88);
+  border-right: 1px solid #e2e8f0;
+  font: 12px/1 Arial, sans-serif;
+}
+
+.document-line-number-gutter span {
+  position: absolute;
+  right: 4px;
+  min-width: 16px;
+  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.pdf-page-frame {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
 }
 
 .docx-viewer .docx-page > section.docx,
