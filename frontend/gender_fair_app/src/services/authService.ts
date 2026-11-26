@@ -9,6 +9,7 @@ export const authService = {
     password: string;
     password_confirm: string;
     role: 'student' | 'faculty' | 'admin';
+    department: string;
   }) => api.post('/auth/signup/', data),
 
   login: (email: string, password: string) =>
@@ -126,8 +127,8 @@ export const adminService = {
   updateSupportMessage: (messageId: number, data: { is_resolved: boolean }) =>
     api.patch(`/admin/support-messages/${messageId}/`, data),
 
-  getAnalytics: () =>
-    api.get('/admin/analytics/'),
+  getAnalytics: (filters?: { department?: string; year?: string }) =>
+    api.get('/admin/analytics/', { params: filters }),
 
   getDataset: (search?: string) => {
     const params = search ? { search } : {};

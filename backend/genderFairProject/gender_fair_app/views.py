@@ -1109,6 +1109,18 @@ def admin_analytics_view(request):
             {'error': 'Admin access required'},
             status=status.HTTP_403_FORBIDDEN
         )
+
+    department = request.query_params.get('department', '')
+    if department and department not in dict(UserProfile.DEPARTMENT_CHOICES):
+        return Response({'department': 'Select a valid faculty department.'}, status=status.HTTP_400_BAD_REQUEST)
+    requested_year = request.query_params.get('year', '')
+    if requested_year:
+        try:
+            year = int(requested_year)
+        except ValueError:
+            return Response({'year': 'Enter a valid year.'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        year = None
     
     # Total statistics
     total_documents = Document.objects.count()
@@ -1199,14 +1211,26 @@ def admin_analytics_view(request):
     )[:3]
 
     # Count uploaded files only; free-form text analyses are stored as file_type='text'.
+    continuum_documents = Document.objects.filter(
+        file_type__in=('txt', 'docx', 'pdf'),
+        gender_level_classification__in=[
+            value for value, _ in Document.GENDER_LEVEL_CHOICES
+        ],
+    )
+    if department:
+        continuum_documents = continuum_documents.filter(
+            user__profile__role='faculty',
+            user__profile__department=department,
+        )
+    available_years = [
+        date.year for date in continuum_documents.dates('created_at', 'year', order='DESC')
+    ]
+    if year is not None:
+        continuum_documents = continuum_documents.filter(created_at__year=year)
+
     gender_level_counts = {
         row['gender_level_classification']: row['count']
-        for row in Document.objects.filter(
-            file_type__in=('txt', 'docx', 'pdf'),
-            gender_level_classification__in=[
-                value for value, _ in Document.GENDER_LEVEL_CHOICES
-            ]
-        ).values('gender_level_classification').annotate(count=Count('id'))
+        for row in continuum_documents.values('gender_level_classification').annotate(count=Count('id'))
     }
     total_analyzed_documents = sum(gender_level_counts.values())
     gender_level_ranges = {
@@ -1218,6 +1242,8 @@ def admin_analytics_view(request):
     }
     gender_level_continuum_analytics = {
         'total_analyzed_documents': total_analyzed_documents,
+        'departments': [value for value, _ in UserProfile.DEPARTMENT_CHOICES],
+        'available_years': available_years,
         'distribution': [
             {
                 'classification': value,

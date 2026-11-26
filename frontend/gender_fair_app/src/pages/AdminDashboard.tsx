@@ -45,6 +45,8 @@ interface AnalyticsData {
   most_common_biased_words: Record<string, number>;
   gender_level_continuum_analytics?: {
     total_analyzed_documents: number;
+    departments: string[];
+    available_years: number[];
     distribution: Array<{
       classification: string;
       label: string;
@@ -196,6 +198,8 @@ export default function AdminDashboard() {
   const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [continuumDepartment, setContinuumDepartment] = useState('all');
+  const [continuumYear, setContinuumYear] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -284,7 +288,10 @@ export default function AdminDashboard() {
     try {
       switch (activeTab) {
         case 'analytics': {
-          const analyticsRes = await adminService.getAnalytics();
+          const filters: { department?: string; year?: string } = {};
+          if (continuumDepartment !== 'all') filters.department = continuumDepartment;
+          if (continuumYear !== 'all') filters.year = continuumYear;
+          const analyticsRes = await adminService.getAnalytics(filters);
           setAnalytics(analyticsRes.data);
           break;
         }
@@ -435,7 +442,7 @@ export default function AdminDashboard() {
         window.removeEventListener('focus', handleFocus);
       };
     }
-  }, [activeTab, user?.profile?.role]);
+  }, [activeTab, user?.profile?.role, continuumDepartment, continuumYear]);
 
   const handleLogout = () => {
     authService.logout();
@@ -901,17 +908,48 @@ export default function AdminDashboard() {
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Document classifications</p>
                   <h2 className="mt-1 text-xl font-semibold text-slate-900">Gender Level Continuum Analytics</h2>
                 </div>
-                <div className="rounded-xl bg-indigo-50 px-4 py-3 text-left sm:text-right">
-                  <p className="text-xs font-medium uppercase tracking-wide text-indigo-700">Total analyzed documents</p>
-                  <p className="text-2xl font-bold text-indigo-950">
-                    {analytics.gender_level_continuum_analytics?.total_analyzed_documents ?? 0}
-                  </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className="text-xs font-medium text-slate-600">
+                    Faculty department
+                    <select
+                      value={continuumDepartment}
+                      onChange={(event) => {
+                        setContinuumDepartment(event.target.value);
+                        setContinuumYear('all');
+                      }}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    >
+                      <option value="all">All departments</option>
+                      {(analytics.gender_level_continuum_analytics?.departments ?? []).map((department) => (
+                        <option key={department} value={department}>{department}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Year
+                    <select
+                      value={continuumYear}
+                      onChange={(event) => setContinuumYear(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    >
+                      <option value="all">All years</option>
+                      {(analytics.gender_level_continuum_analytics?.available_years ?? []).map((year) => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="rounded-xl bg-indigo-50 px-4 py-3 text-left sm:text-right">
+                    <p className="text-xs font-medium uppercase tracking-wide text-indigo-700">Total analyzed documents</p>
+                    <p className="text-2xl font-bold text-indigo-950">
+                      {analytics.gender_level_continuum_analytics?.total_analyzed_documents ?? 0}
+                    </p>
+                  </div>
                 </div>
               </div>
 
               {(analytics.gender_level_continuum_analytics?.total_analyzed_documents ?? 0) === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center text-sm text-slate-500">
-                  No analyzed documents yet. Upload and analyze a document to see its classification here.
+                  No analyzed documents found for the selected department and year.
                 </div>
               ) : (
                 <div className="space-y-4">

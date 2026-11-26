@@ -14,7 +14,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = [
-            'user_email', 'user_first_name', 'user_last_name', 'role', 'avatar', 'bio', 
+            'user_email', 'user_first_name', 'user_last_name', 'role', 'department', 'avatar', 'bio', 
             'analyses_count', 'biased_words_detected', 'average_score',
             'created_at', 'updated_at'
         ]
@@ -34,18 +34,29 @@ class SignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
     role = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES)
+    department = serializers.ChoiceField(
+        choices=UserProfile.DEPARTMENT_CHOICES,
+        required=False,
+        allow_blank=True,
+    )
     
     class Meta:
         model = User
-        fields = ['email', 'first_name', 'last_name', 'password', 'password_confirm', 'role']
+        fields = ['email', 'first_name', 'last_name', 'password', 'password_confirm', 'role', 'department']
     
     def validate(self, data):
         if data['password'] != data.pop('password_confirm'):
             raise serializers.ValidationError({"password": "Passwords do not match."})
+        department = data.get('department', '')
+        if data['role'] == 'faculty' and not department:
+            raise serializers.ValidationError({"department": "Select your faculty department."})
+        if data['role'] != 'faculty' and department:
+            raise serializers.ValidationError({"department": "Only faculty accounts can select a department."})
         return data
     
     def create(self, validated_data):
         role = validated_data.pop('role')
+        department = validated_data.pop('department', '')
         if User.objects.filter(username=validated_data['email']).exists():
             raise serializers.ValidationError({'email': 'A user with this email already exists.'})
 
@@ -59,10 +70,11 @@ class SignupSerializer(serializers.ModelSerializer):
 
         profile, created = UserProfile.objects.get_or_create(
             user=user,
-            defaults={'role': role}
+            defaults={'role': role, 'department': department}
         )
         if not created:
             profile.role = role
+            profile.department = department
             profile.save()
 
         return user

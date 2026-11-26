@@ -34,12 +34,18 @@ export default function Signup() {
     password: '',
     password_confirm: '',
     role: 'student' as 'student' | 'faculty' | 'admin',
+    department: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData((previous) => ({
+      ...previous,
+      [name]: value,
+      ...(name === 'role' && value !== 'faculty' ? { department: '' } : {}),
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -257,6 +263,29 @@ export default function Signup() {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+
+              {formData.role === 'faculty' && (
+                <div>
+                  <label htmlFor="department" className="block text-sm font-medium text-slate-300 mb-2">Department</label>
+                  <select
+                    id="department"
+                    name="department"
+                    value={formData.department}
+                    onChange={handleChange}
+                    required
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-sm text-slate-100 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/20"
+                  >
+                    <option value="">Select department</option>
+                    <option value="SAS">SAS</option>
+                    <option value="STCS">STCS</option>
+                    <option value="SCJE">SCJE</option>
+                    <option value="SME">SME</option>
+                    <option value="SOE">SOE</option>
+                    <option value="STED">STED</option>
+                    <option value="SNHS">SNHS</option>
+                  </select>
+                </div>
+              )}
 
               <button
                 type="submit"

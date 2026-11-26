@@ -8,8 +8,18 @@ class UserProfile(models.Model):
         ('faculty', 'Faculty'),
         ('admin', 'Admin'),
     ]
+    DEPARTMENT_CHOICES = [
+        ('SAS', 'SAS'),
+        ('STCS', 'STCS'),
+        ('SCJE', 'SCJE'),
+        ('SME', 'SME'),
+        ('SOE', 'SOE'),
+        ('STED', 'STED'),
+        ('SNHS', 'SNHS'),
+    ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='student')
+    department = models.CharField(max_length=4, choices=DEPARTMENT_CHOICES, blank=True, default='')
     avatar = models.CharField(max_length=255, default='default_avatar.png', help_text='Path or URL to avatar')
     bio = models.TextField(blank=True, default='')
     

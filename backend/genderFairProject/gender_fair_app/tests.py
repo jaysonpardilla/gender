@@ -39,6 +39,7 @@ class SignupTests(TestCase):
                         'password': 'password123',
                         'password_confirm': 'password123',
                         'role': role,
+                        'department': 'SAS' if role == 'faculty' else '',
                     },
                     format='json',
                 )
@@ -47,6 +48,24 @@ class SignupTests(TestCase):
                 user = User.objects.get(email=f'new-{role}@example.com')
                 profile = UserProfile.objects.get(user=user)
                 self.assertEqual(profile.role, role)
+                self.assertEqual(profile.department, 'SAS' if role == 'faculty' else '')
+
+    def test_signup_requires_a_valid_department_for_faculty(self):
+        response = self.client.post(
+            '/api/auth/signup/',
+            {
+                'email': 'faculty-without-department@example.com',
+                'first_name': 'Faculty',
+                'last_name': 'Member',
+                'password': 'password123',
+                'password_confirm': 'password123',
+                'role': 'faculty',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('department', response.data)
 
     def test_signup_ignores_invalid_authentication_header(self):
         response = self.client.post(
@@ -789,6 +808,60 @@ class AdminAnalyticsTests(TestCase):
         self.assertEqual(distribution['gender_aware']['count'], 1)
         self.assertEqual(distribution['gender_aware']['percentage'], 33.3)
         self.assertEqual(distribution['gender_transformative']['count'], 0)
+
+    def test_admin_gender_level_analytics_filters_by_department_and_year(self):
+        admin = User.objects.create_user(
+            username='admin-department-analytics@example.com',
+            email='admin-department-analytics@example.com',
+            password='password123',
+        )
+        admin.profile.role = 'admin'
+        admin.profile.save()
+
+        sas_faculty = User.objects.create_user(
+            username='sas-faculty@example.com',
+            email='sas-faculty@example.com',
+            password='password123',
+        )
+        sas_faculty.profile.role = 'faculty'
+        sas_faculty.profile.department = 'SAS'
+        sas_faculty.profile.save()
+        stcs_faculty = User.objects.create_user(
+            username='stcs-faculty@example.com',
+            email='stcs-faculty@example.com',
+            password='password123',
+        )
+        stcs_faculty.profile.role = 'faculty'
+        stcs_faculty.profile.department = 'STCS'
+        stcs_faculty.profile.save()
+
+        documents = [
+            (sas_faculty, 'gender_blind', timezone.datetime(2025, 6, 1, tzinfo=timezone.get_current_timezone())),
+            (sas_faculty, 'gender_aware', timezone.datetime(2026, 6, 1, tzinfo=timezone.get_current_timezone())),
+            (stcs_faculty, 'gender_responsive', timezone.datetime(2026, 6, 1, tzinfo=timezone.get_current_timezone())),
+        ]
+        for owner, classification, created_at in documents:
+            document = Document.objects.create(
+                user=owner,
+                original_text='saved result',
+                processed_text='saved result',
+                gender_level_classification=classification,
+                file_type='txt',
+            )
+            Document.objects.filter(id=document.id).update(created_at=created_at)
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get('/api/admin/analytics/?department=SAS&year=2026')
+
+        self.assertEqual(response.status_code, 200)
+        continuum = response.data['gender_level_continuum_analytics']
+        self.assertEqual(continuum['total_analyzed_documents'], 1)
+        self.assertEqual(continuum['available_years'], [2026, 2025])
+        distribution = {item['classification']: item for item in continuum['distribution']}
+        self.assertEqual(distribution['gender_aware']['count'], 1)
+        self.assertEqual(distribution['gender_aware']['percentage'], 100)
+        self.assertEqual(distribution['gender_responsive']['count'], 0)
 
     def test_admin_gender_level_analytics_updates_from_uploaded_files_only(self):
         admin = User.objects.create_user(
